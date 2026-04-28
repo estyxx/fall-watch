@@ -71,60 +71,61 @@ def main() -> None:
     not_on_floor_streak = 0
     update_offset = 0
 
-    while True:
-        update_offset = _handle_commands(update_offset, latest_frame, on_floor_since)
+    try:
+        while True:
+            update_offset = _handle_commands(update_offset, latest_frame, on_floor_since)
 
-        ret, frame = cap.read()
+            ret, frame = cap.read()
 
-        if not ret:
-            _log("⚠️  Lost camera connection, retrying in 10s...")
-            cap.release()
-            time.sleep(10)
-            cap = _open_stream(RTSP_URL)
-            continue
+            if not ret:
+                _log("⚠️  Lost camera connection, retrying in 10s...")
+                cap.release()
+                time.sleep(10)
+                cap = _open_stream(RTSP_URL)
+                continue
 
-        latest_frame = frame
-        now = datetime.now()
-        person_on_floor = analyse_frame(model, frame)
+            latest_frame = frame
+            now = datetime.now()
+            person_on_floor = analyse_frame(model, frame)
 
-        if person_on_floor:
-            not_on_floor_streak = 0
+            if person_on_floor:
+                not_on_floor_streak = 0
 
-            if on_floor_since is None:
-                on_floor_since = now
-                _log("⚠️  Person on floor — timer started")
+                if on_floor_since is None:
+                    on_floor_since = now
+                    _log("⚠️  Person on floor — timer started")
 
-            last_floor_frame = frame.copy()
-            minutes_on_floor = (now - on_floor_since).total_seconds() / 60
-            cooldown_ok = alert_sent_at is None or (
-                now - alert_sent_at > timedelta(minutes=ALERT_COOLDOWN_MINUTES)
-            )
+                last_floor_frame = frame.copy()
+                minutes_on_floor = (now - on_floor_since).total_seconds() / 60
+                cooldown_ok = alert_sent_at is None or (
+                    now - alert_sent_at > timedelta(minutes=ALERT_COOLDOWN_MINUTES)
+                )
 
-            if minutes_on_floor >= FALL_THRESHOLD_MINUTES and cooldown_ok:
-                _log(f"🚨 Alerting! On floor for {minutes_on_floor:.1f}min")
-                send_fall_alert(minutes_on_floor, frame)
-                alert_sent_at = now
+                if minutes_on_floor >= FALL_THRESHOLD_MINUTES and cooldown_ok:
+                    _log(f"🚨 Alerting! On floor for {minutes_on_floor:.1f}min")
+                    send_fall_alert(minutes_on_floor, frame)
+                    alert_sent_at = now
 
-            was_on_floor = True
+                was_on_floor = True
 
-        else:
-            if was_on_floor:
-                not_on_floor_streak += 1
-                _log(f"📊 Off floor streak: {not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}")
+            else:
+                if was_on_floor:
+                    not_on_floor_streak += 1
+                    _log(f"📊 Off floor streak: {not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}")
 
-                if not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
-                    _log("✅ Person got up")
-                    if alert_sent_at is not None:
-                        send_all_clear(last_floor_frame)
-                    on_floor_since = None
-                    alert_sent_at = None
-                    last_floor_frame = None
-                    was_on_floor = False
-                    not_on_floor_streak = 0
+                    if not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
+                        _log("✅ Person got up")
+                        if alert_sent_at is not None:
+                            send_all_clear(last_floor_frame)
+                        on_floor_since = None
+                        alert_sent_at = None
+                        last_floor_frame = None
+                        was_on_floor = False
+                        not_on_floor_streak = 0
 
-        time.sleep(FRAME_INTERVAL_SECONDS)
-
-    cap.release()
+            time.sleep(FRAME_INTERVAL_SECONDS)
+    finally:
+        cap.release()
 
 
 if __name__ == "__main__":
