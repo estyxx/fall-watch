@@ -81,7 +81,10 @@ def main() -> None:
                 _log("⚠️  Lost camera connection, retrying in 10s...")
                 cap.release()
                 time.sleep(10)
-                cap = _open_stream(RTSP_URL)
+                try:
+                    cap = _open_stream(RTSP_URL)
+                except RuntimeError as e:
+                    _log(f"❌ Reconnect failed: {e} — will retry")
                 continue
 
             latest_frame = frame
