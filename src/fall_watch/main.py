@@ -5,8 +5,15 @@ from datetime import datetime, timedelta
 import cv2
 import numpy as np
 from dotenv import load_dotenv
-from nonno_watch.detector import analyse_frame, load_model
-from nonno_watch.notifier import send_all_clear, send_fall_alert, send_startup
+
+from fall_watch.detector import analyse_frame, load_model
+from fall_watch.notifier import (
+    poll_commands,
+    send_all_clear,
+    send_fall_alert,
+    send_startup,
+    send_status_reply,
+)
 
 load_dotenv()
 
@@ -28,6 +35,23 @@ def _open_stream(url: str) -> cv2.VideoCapture:
     return cap
 
 
+def _handle_commands(
+    update_offset: int,
+    latest_frame: np.ndarray | None,
+    on_floor_since: datetime | None,
+) -> int:
+    """Poll Telegram for commands and reply to any /status requests."""
+    commands, new_offset = poll_commands(update_offset)
+    for chat_id, cmd in commands:
+        match cmd:
+            case "/status":
+                _log(f"📲 /status requested by chat {chat_id}")
+                send_status_reply(chat_id, latest_frame, on_floor_since)
+            case _:
+                _log(f"⚙️  Unknown command '{cmd}' from chat {chat_id} — ignored")
+    return new_offset
+
+
 def main() -> None:
     _log("🟢 OcchioSuNonno starting...")
     model = load_model()
@@ -42,10 +66,14 @@ def main() -> None:
     on_floor_since: datetime | None = None
     alert_sent_at: datetime | None = None
     last_floor_frame: np.ndarray | None = None
+    latest_frame: np.ndarray | None = None
     was_on_floor = False
     not_on_floor_streak = 0
+    update_offset = 0
 
     while True:
+        update_offset = _handle_commands(update_offset, latest_frame, on_floor_since)
+
         ret, frame = cap.read()
 
         if not ret:
@@ -55,6 +83,7 @@ def main() -> None:
             cap = _open_stream(RTSP_URL)
             continue
 
+        latest_frame = frame
         now = datetime.now()
         person_on_floor = analyse_frame(model, frame)
 

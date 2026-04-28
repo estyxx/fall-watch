@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from typing import Any
 
 import cv2
 import numpy as np
@@ -14,8 +15,9 @@ def _token_and_chat() -> tuple[str, str]:
     return os.environ["TELEGRAM_TOKEN"], os.environ["TELEGRAM_CHAT_ID"]
 
 
-def _send_text(text: str) -> bool:
-    token, chat_id = _token_and_chat()
+def _send_text(text: str, to_chat_id: str | None = None) -> bool:
+    token, default_chat_id = _token_and_chat()
+    chat_id = to_chat_id or default_chat_id
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -29,16 +31,21 @@ def _send_text(text: str) -> bool:
         return False
 
 
-def _send_photo(frame: np.ndarray | None, caption: str) -> bool:
+def _send_photo(
+    frame: np.ndarray | None,
+    caption: str,
+    to_chat_id: str | None = None,
+) -> bool:
     """Encode frame as JPEG and send it to Telegram with a caption."""
     if frame is None:
-        return _send_text(caption)
+        return _send_text(caption, to_chat_id)
 
-    token, chat_id = _token_and_chat()
+    token, default_chat_id = _token_and_chat()
+    chat_id = to_chat_id or default_chat_id
     try:
         ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if not ok:
-            return _send_text(caption)  # fallback to text if encoding fails
+            return _send_text(caption, to_chat_id)
 
         r = requests.post(
             f"https://api.telegram.org/bot{token}/sendPhoto",
@@ -50,7 +57,65 @@ def _send_photo(frame: np.ndarray | None, caption: str) -> bool:
         return True
     except requests.RequestException as e:
         print(f"[{_now()}] ❌ Telegram photo error: {e}")
-        return _send_text(caption)  # fallback to text on failure
+        return _send_text(caption, to_chat_id)
+
+
+def poll_commands(offset: int) -> tuple[list[tuple[str, str]], int]:
+    """
+    Poll Telegram getUpdates (non-blocking, timeout=0).
+
+    Returns a list of (chat_id, command) pairs for any bot commands found,
+    and the next offset to pass on the following call to avoid reprocessing.
+    """
+    token = os.environ["TELEGRAM_TOKEN"]
+    try:
+        # POST is accepted by the Bot API and avoids params serialisation issues
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            json={"offset": offset, "timeout": 0, "allowed_updates": ["message"]},
+            timeout=5,
+        )
+        r.raise_for_status()
+        data: Any = r.json()  # untyped Bot API response
+    except requests.RequestException as e:
+        print(f"[{_now()}] ❌ Telegram poll error: {e}")
+        return [], offset
+
+    commands: list[tuple[str, str]] = []
+    new_offset = offset
+
+    for update in data.get("result", []):
+        update_id: int = update["update_id"]
+        new_offset = max(new_offset, update_id + 1)
+
+        msg: Any = update.get("message", {})
+        text: str = str(msg.get("text", ""))
+        chat_id: str = str(msg.get("chat", {}).get("id", ""))
+
+        if text.startswith("/") and chat_id:
+            # Strip bot @mention: /status@MyBot → /status
+            cmd = text.split("@")[0].split()[0]
+            commands.append((chat_id, cmd))
+
+    return commands, new_offset
+
+
+def send_status_reply(
+    to_chat_id: str,
+    frame: np.ndarray | None,
+    on_floor_since: datetime | None,
+) -> bool:
+    """Reply to a /status command with the latest frame and current state."""
+    if on_floor_since is not None:
+        minutes = (datetime.now() - on_floor_since).total_seconds() / 60
+        status_line = (
+            f"⚠️ <b>Nonno è a terra da {minutes:.0f} minut{'o' if minutes < 2 else 'i'}!</b>"
+        )
+    else:
+        status_line = "✅ <b>Nonno sta bene.</b>"
+
+    caption = f"{status_line}\n🕐 {_now()}"
+    return _send_photo(frame, caption, to_chat_id)
 
 
 def send_fall_alert(minutes_on_floor: float, frame: np.ndarray | None = None) -> bool:
@@ -68,4 +133,7 @@ def send_all_clear(frame: np.ndarray | None = None) -> bool:
 
 
 def send_startup() -> bool:
-    return _send_text("👋 <b>OcchioSuNonno attivo!</b>\nIl sistema di monitoraggio è operativo. 🟢")
+    return _send_text(
+        "👋 <b>OcchioSuNonno attivo!</b>\nIl sistema di monitoraggio è operativo. 🟢\n"
+        "Invia /status per ricevere uno screenshot live."
+    )

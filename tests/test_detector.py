@@ -1,5 +1,5 @@
 """
-Full integration test — webcam + YOLOv8 detection + Telegram alerts.
+Full integration test — webcam + YOLOv8 detection + Telegram alerts + /status command.
 
 - Green box = standing/sitting (ok)
 - Red box = ON FLOOR (triggers alert after threshold)
@@ -13,7 +13,13 @@ import cv2
 from dotenv import load_dotenv
 
 from fall_watch.detector import _is_lying_down, load_model
-from fall_watch.notifier import send_all_clear, send_fall_alert, send_startup
+from fall_watch.notifier import (
+    poll_commands,
+    send_all_clear,
+    send_fall_alert,
+    send_startup,
+    send_status_reply,
+)
 
 load_dotenv()
 
@@ -44,14 +50,27 @@ def main() -> None:
 
     on_floor_since: datetime | None = None
     alert_sent_at: datetime | None = None
+    latest_frame: object = None
     was_on_floor = False
     not_on_floor_streak = 0
+    update_offset = 0
 
     while True:
+        # --- Poll Telegram for commands ---
+        commands, update_offset = poll_commands(update_offset)
+        for chat_id, cmd in commands:
+            match cmd:
+                case "/status":
+                    _log(f"📲 /status from chat {chat_id}")
+                    send_status_reply(chat_id, latest_frame, on_floor_since)
+                case _:
+                    _log(f"⚙️  Unknown command '{cmd}' — ignored")
+
         ret, frame = cap.read()
         if not ret:
             break
 
+        latest_frame = frame
         now = datetime.now()
         results = model(frame, verbose=False)
         display = frame.copy()
@@ -102,29 +121,17 @@ def main() -> None:
                 send_fall_alert(seconds_on_floor / 60, frame)
                 alert_sent_at = now
 
-            # Countdown overlay
             remaining = max(0, FALL_THRESHOLD_SECONDS - seconds_on_floor)
-            if alert_sent_at is None:
-                cv2.putText(
-                    display,
-                    f"Alert in {remaining:.0f}s",
-                    (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 0, 255),
-                    2,
-                )
-            else:
-                cv2.putText(
-                    display, "ALERT SENT", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2
-                )
+            label_text = f"Alert in {remaining:.0f}s" if alert_sent_at is None else "ALERT SENT"
+            cv2.putText(
+                display, label_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2
+            )
 
             was_on_floor = True
 
         else:
             if was_on_floor:
                 not_on_floor_streak += 1
-
                 cv2.putText(
                     display,
                     f"Checking... {not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}",
