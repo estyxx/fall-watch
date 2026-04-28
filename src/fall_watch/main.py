@@ -1,5 +1,6 @@
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import cv2
@@ -24,6 +25,16 @@ FRAME_INTERVAL_SECONDS = 5
 NOT_ON_FLOOR_STREAK_MAX = 3  # consecutive "ok" frames before declaring all clear
 
 
+@dataclass
+class FallState:
+    on_floor_since: datetime | None = None
+    alert_sent_at: datetime | None = None
+    last_floor_frame: np.ndarray | None = field(default=None, repr=False)
+    latest_frame: np.ndarray | None = field(default=None, repr=False)
+    was_on_floor: bool = False
+    not_on_floor_streak: int = 0
+
+
 def _log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -35,18 +46,14 @@ def _open_stream(url: str) -> cv2.VideoCapture:
     return cap
 
 
-def _handle_commands(
-    update_offset: int,
-    latest_frame: np.ndarray | None,
-    on_floor_since: datetime | None,
-) -> int:
+def _handle_commands(update_offset: int, state: FallState) -> int:
     """Poll Telegram for commands and reply to any /status requests."""
     commands, new_offset = poll_commands(update_offset)
     for chat_id, cmd in commands:
         match cmd:
             case "/status":
                 _log(f"📲 /status requested by chat {chat_id}")
-                send_status_reply(chat_id, latest_frame, on_floor_since)
+                send_status_reply(chat_id, state.latest_frame, state.on_floor_since)
             case _:
                 _log(f"⚙️  Unknown command '{cmd}' from chat {chat_id} — ignored")
     return new_offset
@@ -63,17 +70,12 @@ def main() -> None:
     cap = _open_stream(RTSP_URL)
     _log("📷 Camera stream connected")
 
-    on_floor_since: datetime | None = None
-    alert_sent_at: datetime | None = None
-    last_floor_frame: np.ndarray | None = None
-    latest_frame: np.ndarray | None = None
-    was_on_floor = False
-    not_on_floor_streak = 0
+    state = FallState()
     update_offset = 0
 
     try:
         while True:
-            update_offset = _handle_commands(update_offset, latest_frame, on_floor_since)
+            update_offset = _handle_commands(update_offset, state)
 
             ret, frame = cap.read()
 
@@ -87,44 +89,42 @@ def main() -> None:
                     _log(f"❌ Reconnect failed: {e} — will retry")
                 continue
 
-            latest_frame = frame
+            state.latest_frame = frame
             now = datetime.now()
             person_on_floor = analyse_frame(model, frame)
 
             if person_on_floor:
-                not_on_floor_streak = 0
+                state.not_on_floor_streak = 0
 
-                if on_floor_since is None:
-                    on_floor_since = now
+                if state.on_floor_since is None:
+                    state.on_floor_since = now
                     _log("⚠️  Person on floor — timer started")
 
-                last_floor_frame = frame.copy()
-                minutes_on_floor = (now - on_floor_since).total_seconds() / 60
-                cooldown_ok = alert_sent_at is None or (
-                    now - alert_sent_at > timedelta(minutes=ALERT_COOLDOWN_MINUTES)
+                state.last_floor_frame = frame.copy()
+                minutes_on_floor = (now - state.on_floor_since).total_seconds() / 60
+                cooldown_ok = state.alert_sent_at is None or (
+                    now - state.alert_sent_at > timedelta(minutes=ALERT_COOLDOWN_MINUTES)
                 )
 
                 if minutes_on_floor >= FALL_THRESHOLD_MINUTES and cooldown_ok:
                     _log(f"🚨 Alerting! On floor for {minutes_on_floor:.1f}min")
                     send_fall_alert(minutes_on_floor, frame)
-                    alert_sent_at = now
+                    state.alert_sent_at = now
 
-                was_on_floor = True
+                state.was_on_floor = True
 
             else:
-                if was_on_floor:
-                    not_on_floor_streak += 1
-                    _log(f"📊 Off floor streak: {not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}")
+                if state.was_on_floor:
+                    state.not_on_floor_streak += 1
+                    _log(
+                        f"📊 Off floor streak: {state.not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}"
+                    )
 
-                    if not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
+                    if state.not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
                         _log("✅ Person got up")
-                        if alert_sent_at is not None:
-                            send_all_clear(last_floor_frame)
-                        on_floor_since = None
-                        alert_sent_at = None
-                        last_floor_frame = None
-                        was_on_floor = False
-                        not_on_floor_streak = 0
+                        if state.alert_sent_at is not None:
+                            send_all_clear(state.last_floor_frame)
+                        state = FallState()
 
             time.sleep(FRAME_INTERVAL_SECONDS)
     finally:
