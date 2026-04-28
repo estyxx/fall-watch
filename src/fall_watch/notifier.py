@@ -6,21 +6,19 @@ import cv2
 import numpy as np
 import requests
 
+_TOKEN: str = os.environ["TELEGRAM_TOKEN"]
+_CHAT_ID: str = os.environ["TELEGRAM_CHAT_ID"]
+
 
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
-def _token_and_chat() -> tuple[str, str]:
-    return os.environ["TELEGRAM_TOKEN"], os.environ["TELEGRAM_CHAT_ID"]
-
-
 def _send_text(text: str, to_chat_id: str | None = None) -> bool:
-    token, default_chat_id = _token_and_chat()
-    chat_id = to_chat_id or default_chat_id
+    chat_id = to_chat_id or _CHAT_ID
     try:
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
+            f"https://api.telegram.org/bot{_TOKEN}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
@@ -40,15 +38,14 @@ def _send_photo(
     if frame is None:
         return _send_text(caption, to_chat_id)
 
-    token, default_chat_id = _token_and_chat()
-    chat_id = to_chat_id or default_chat_id
+    chat_id = to_chat_id or _CHAT_ID
     try:
         ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if not ok:
             return _send_text(caption, to_chat_id)
 
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendPhoto",
+            f"https://api.telegram.org/bot{_TOKEN}/sendPhoto",
             data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
             files={"photo": ("alert.jpg", buffer.tobytes(), "image/jpeg")},
             timeout=15,
@@ -67,11 +64,10 @@ def poll_commands(offset: int) -> tuple[list[tuple[str, str]], int]:
     Returns a list of (chat_id, command) pairs for any bot commands found,
     and the next offset to pass on the following call to avoid reprocessing.
     """
-    token = os.environ["TELEGRAM_TOKEN"]
     try:
         # POST is accepted by the Bot API and avoids params serialisation issues
         r = requests.post(
-            f"https://api.telegram.org/bot{token}/getUpdates",
+            f"https://api.telegram.org/bot{_TOKEN}/getUpdates",
             json={"offset": offset, "timeout": 0, "allowed_updates": ["message"]},
             timeout=5,
         )
