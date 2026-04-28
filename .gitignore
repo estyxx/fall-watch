@@ -8,3 +8,4 @@ dist/
 .ruff_cache/
 .pytest_cache/
 *.pt          # YOLO model weights
+yolov8n-pose.pt
