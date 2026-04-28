@@ -4,9 +4,8 @@ from datetime import datetime, timedelta
 
 import cv2
 from dotenv import load_dotenv
-
-from fall_watch.detector import analyse_frame, load_model
-from fall_watch.notifier import send_all_clear, send_fall_alert, send_startup
+from nonno_watch.detector import analyse_frame, load_model
+from nonno_watch.notifier import send_all_clear, send_fall_alert, send_startup
 
 load_dotenv()
 
@@ -68,7 +67,7 @@ def main() -> None:
 
                 if minutes_on_floor >= FALL_THRESHOLD_MINUTES and cooldown_ok:
                     _log(f"🚨 Alerting! On floor for {minutes_on_floor:.1f}min")
-                    send_fall_alert(minutes_on_floor)
+                    send_fall_alert(minutes_on_floor, frame)
                     alert_sent_at = now
 
                 was_on_floor = True

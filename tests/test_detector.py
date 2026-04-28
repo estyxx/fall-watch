@@ -7,7 +7,7 @@ Press Q to quit.
 """
 
 import cv2
-import numpy as np
+
 from fall_watch.detector import _is_lying_down, load_model
 
 
@@ -44,8 +44,9 @@ def main() -> None:
                 if i < len(boxes):
                     x1, y1, x2, y2 = boxes[i].astype(int)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, label, (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                    cv2.putText(
+                        frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2
+                    )
 
                 # Draw keypoints
                 for kp in person_kps:
