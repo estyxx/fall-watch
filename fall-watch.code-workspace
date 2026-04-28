@@ -1,0 +1,127 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    // --- Python ---
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+
+    // --- Ruff (lint + format, replaces pylint/flake8/isort/black) ---
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff",
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.fixAll.ruff": "explicit",
+        "source.organizeImports.ruff": "explicit"
+      }
+    },
+    "ruff.lint.enable": true,
+    "ruff.format.enable": true,
+
+    // --- Mypy ---
+    "mypy-type-checker.enabled": true,
+    "mypy-type-checker.reportingScope": "workspace",
+
+    // --- Editor ---
+    "editor.rulers": [100],
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.trimAutoWhitespace": true,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+
+    // --- File exclusions ---
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.mypy_cache": true,
+      "**/.ruff_cache": true,
+      "**/.pytest_cache": true,
+      "**/*.egg-info": true,
+      "**/*.pt": true
+    },
+    "search.exclude": {
+      "**/__pycache__": true,
+      "**/.venv": true,
+      "**/*.pt": true
+    },
+
+    // --- Terminal ---
+    "terminal.integrated.env.osx": {
+      "PYTHONPATH": "${workspaceFolder}/src"
+    },
+    "terminal.integrated.env.linux": {
+      "PYTHONPATH": "${workspaceFolder}/src"
+    },
+    "window.title": "${activeEditorShort}${separator}${rootName}${separator}${profileName}${separator}[Branch: main]"
+  },
+  "extensions": {
+    "recommendations": [
+      "charliermarsh.ruff",
+      "ms-python.python",
+      "ms-python.mypy-type-checker",
+      "tamasfe.even-better-toml"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Run fall-watch",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "fall_watch.main",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        },
+        "envFile": "${workspaceFolder}/.env",
+        "console": "integratedTerminal"
+      },
+      {
+        "name": "Test Telegram",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/tests/test_telegram.py",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        },
+        "envFile": "${workspaceFolder}/.env",
+        "console": "integratedTerminal"
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "lint",
+        "type": "shell",
+        "command": "uv run ruff check src/",
+        "group": "test",
+        "presentation": { "reveal": "always", "panel": "shared" }
+      },
+      {
+        "label": "format",
+        "type": "shell",
+        "command": "uv run ruff format src/",
+        "group": "test",
+        "presentation": { "reveal": "always", "panel": "shared" }
+      },
+      {
+        "label": "typecheck",
+        "type": "shell",
+        "command": "uv run mypy src/",
+        "group": "test",
+        "presentation": { "reveal": "always", "panel": "shared" }
+      },
+      {
+        "label": "check all",
+        "dependsOn": ["lint", "typecheck"],
+        "group": { "kind": "test", "isDefault": true }
+      }
+    ]
+  }
+}
+

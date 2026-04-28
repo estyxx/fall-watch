@@ -1,0 +1,67 @@
+import numpy as np
+from ultralytics import YOLO
+from ultralytics.engine.results import Results
+
+# COCO keypoint indices
+_LEFT_SHOULDER = 5
+_RIGHT_SHOULDER = 6
+_LEFT_HIP = 11
+_RIGHT_HIP = 12
+
+
+def load_model() -> YOLO:
+    """Load YOLOv8 nano pose model — downloads ~6MB on first run."""
+    return YOLO("yolov8n-pose.pt")
+
+
+def _keypoint(kps: np.ndarray, idx: int, min_conf: float = 0.3) -> np.ndarray | None:
+    """Return (x, y) for a keypoint if confidence is high enough, else None."""
+    kp = kps[idx]
+    return kp[:2] if kp[2] >= min_conf else None
+
+
+def _is_lying_down(kps: np.ndarray, frame_height: int) -> bool:
+    """
+    Heuristic: person is on the floor when their body keypoints are more
+    spread horizontally than vertically, OR shoulders and hips are at a
+    similar vertical level (flat body).
+    """
+    points = [
+        _keypoint(kps, _LEFT_SHOULDER),
+        _keypoint(kps, _RIGHT_SHOULDER),
+        _keypoint(kps, _LEFT_HIP),
+        _keypoint(kps, _RIGHT_HIP),
+    ]
+    visible = [p for p in points if p is not None]
+
+    if len(visible) < 2:
+        return False
+
+    ys = [p[1] for p in visible]
+    xs = [p[0] for p in visible]
+    vertical_spread = max(ys) - min(ys)
+    horizontal_spread = max(xs) - min(xs)
+
+    is_horizontal = horizontal_spread > vertical_spread * 1.5
+
+    shoulder_ys = [p[1] for p in [points[0], points[1]] if p is not None]
+    hip_ys = [p[1] for p in [points[2], points[3]] if p is not None]
+
+    is_flat = (
+        bool(shoulder_ys and hip_ys)
+        and abs(float(np.mean(shoulder_ys)) - float(np.mean(hip_ys))) < frame_height * 0.15
+    )
+
+    return is_horizontal or is_flat
+
+
+def analyse_frame(model: YOLO, frame: np.ndarray) -> bool:
+    """Return True if any person in the frame appears to be lying on the floor."""
+    results: list[Results] = model(frame, verbose=False)
+
+    return any(
+        _is_lying_down(person_kps, frame.shape[0])
+        for result in results
+        if result.keypoints is not None
+        for person_kps in result.keypoints.data.cpu().numpy()
+    )
