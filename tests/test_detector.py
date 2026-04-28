@@ -10,6 +10,7 @@ Press Q to quit.
 from datetime import datetime, timedelta
 
 import cv2
+import numpy as np
 from dotenv import load_dotenv
 
 from fall_watch.detector import _is_lying_down, load_model
@@ -50,7 +51,7 @@ def main() -> None:
 
     on_floor_since: datetime | None = None
     alert_sent_at: datetime | None = None
-    latest_frame: object = None
+    latest_frame: np.ndarray | None = None
     was_on_floor = False
     not_on_floor_streak = 0
     update_offset = 0
