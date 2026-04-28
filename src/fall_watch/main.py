@@ -1,28 +1,24 @@
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-import cv2
-import numpy as np
 from dotenv import load_dotenv
 
-from fall_watch.detector import analyse_frame, load_model
-from fall_watch.notifier import (
+# Must run before local imports so Config.load() reads populated os.environ
+load_dotenv()
+
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
+
+from fall_watch.config import Config  # noqa: E402
+from fall_watch.detector import analyse_frame, load_model  # noqa: E402
+from fall_watch.notifier import (  # noqa: E402
     poll_commands,
     send_all_clear,
     send_fall_alert,
     send_startup,
     send_status_reply,
 )
-
-load_dotenv()
-
-RTSP_URL = os.environ["RTSP_URL"]
-FALL_THRESHOLD_MINUTES = float(os.getenv("FALL_THRESHOLD_MINUTES", "3"))
-ALERT_COOLDOWN_MINUTES = float(os.getenv("ALERT_COOLDOWN_MINUTES", "15"))
-FRAME_INTERVAL_SECONDS = 5
-NOT_ON_FLOOR_STREAK_MAX = 3  # consecutive "ok" frames before declaring all clear
 
 
 @dataclass
@@ -46,14 +42,14 @@ def _open_stream(url: str) -> cv2.VideoCapture:
     return cap
 
 
-def _handle_commands(update_offset: int, state: FallState) -> int:
+def _handle_commands(config: Config, update_offset: int, state: FallState) -> int:
     """Poll Telegram for commands and reply to any /status requests."""
-    commands, new_offset = poll_commands(update_offset)
+    commands, new_offset = poll_commands(config, update_offset)
     for chat_id, cmd in commands:
         match cmd:
             case "/status":
                 _log(f"📲 /status requested by chat {chat_id}")
-                send_status_reply(chat_id, state.latest_frame, state.on_floor_since)
+                send_status_reply(config, chat_id, state.latest_frame, state.on_floor_since)
             case _:
                 _log(f"⚙️  Unknown command '{cmd}' from chat {chat_id} — ignored")
     return new_offset
@@ -61,13 +57,15 @@ def _handle_commands(update_offset: int, state: FallState) -> int:
 
 def main() -> None:
     _log("🟢 OcchioSuNonno starting...")
+    config = Config.load()
+
     model = load_model()
     _log("✅ AI model loaded")
 
-    send_startup()
+    send_startup(config)
     _log("✅ Startup message sent")
 
-    cap = _open_stream(RTSP_URL)
+    cap = _open_stream(config.rtsp_url)
     _log("📷 Camera stream connected")
 
     state = FallState()
@@ -75,7 +73,7 @@ def main() -> None:
 
     try:
         while True:
-            update_offset = _handle_commands(update_offset, state)
+            update_offset = _handle_commands(config, update_offset, state)
 
             ret, frame = cap.read()
 
@@ -84,7 +82,7 @@ def main() -> None:
                 cap.release()
                 time.sleep(10)
                 try:
-                    cap = _open_stream(RTSP_URL)
+                    cap = _open_stream(config.rtsp_url)
                 except RuntimeError as e:
                     _log(f"❌ Reconnect failed: {e} — will retry")
                 continue
@@ -103,12 +101,12 @@ def main() -> None:
                 state.last_floor_frame = frame.copy()
                 minutes_on_floor = (now - state.on_floor_since).total_seconds() / 60
                 cooldown_ok = state.alert_sent_at is None or (
-                    now - state.alert_sent_at > timedelta(minutes=ALERT_COOLDOWN_MINUTES)
+                    now - state.alert_sent_at > timedelta(minutes=config.alert_cooldown_minutes)
                 )
 
-                if minutes_on_floor >= FALL_THRESHOLD_MINUTES and cooldown_ok:
+                if minutes_on_floor >= config.fall_threshold_minutes and cooldown_ok:
                     _log(f"🚨 Alerting! On floor for {minutes_on_floor:.1f}min")
-                    send_fall_alert(minutes_on_floor, frame)
+                    send_fall_alert(config, minutes_on_floor, frame)
                     state.alert_sent_at = now
 
                 state.was_on_floor = True
@@ -117,16 +115,16 @@ def main() -> None:
                 if state.was_on_floor:
                     state.not_on_floor_streak += 1
                     _log(
-                        f"📊 Off floor streak: {state.not_on_floor_streak}/{NOT_ON_FLOOR_STREAK_MAX}"
+                        f"📊 Off floor streak: {state.not_on_floor_streak}/{config.not_on_floor_streak_max}"
                     )
 
-                    if state.not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
+                    if state.not_on_floor_streak >= config.not_on_floor_streak_max:
                         _log("✅ Person got up")
                         if state.alert_sent_at is not None:
-                            send_all_clear(state.last_floor_frame)
+                            send_all_clear(config, state.last_floor_frame)
                         state = FallState()
 
-            time.sleep(FRAME_INTERVAL_SECONDS)
+            time.sleep(config.frame_interval_seconds)
     finally:
         cap.release()
 

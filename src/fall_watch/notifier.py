@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import Any
 
@@ -6,19 +5,18 @@ import cv2
 import numpy as np
 import requests
 
-_TOKEN: str = os.environ["TELEGRAM_TOKEN"]
-_CHAT_ID: str = os.environ["TELEGRAM_CHAT_ID"]
+from fall_watch.config import Config
 
 
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 
-def _send_text(text: str, to_chat_id: str | None = None) -> bool:
-    chat_id = to_chat_id or _CHAT_ID
+def _send_text(config: Config, text: str, to_chat_id: str | None = None) -> bool:
+    chat_id = to_chat_id or config.telegram_chat_id
     try:
         r = requests.post(
-            f"https://api.telegram.org/bot{_TOKEN}/sendMessage",
+            f"https://api.telegram.org/bot{config.telegram_token}/sendMessage",
             json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
@@ -30,22 +28,23 @@ def _send_text(text: str, to_chat_id: str | None = None) -> bool:
 
 
 def _send_photo(
+    config: Config,
     frame: np.ndarray | None,
     caption: str,
     to_chat_id: str | None = None,
 ) -> bool:
     """Encode frame as JPEG and send it to Telegram with a caption."""
     if frame is None:
-        return _send_text(caption, to_chat_id)
+        return _send_text(config, caption, to_chat_id)
 
-    chat_id = to_chat_id or _CHAT_ID
+    chat_id = to_chat_id or config.telegram_chat_id
     try:
         ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if not ok:
-            return _send_text(caption, to_chat_id)
+            return _send_text(config, caption, to_chat_id)
 
         r = requests.post(
-            f"https://api.telegram.org/bot{_TOKEN}/sendPhoto",
+            f"https://api.telegram.org/bot{config.telegram_token}/sendPhoto",
             data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
             files={"photo": ("alert.jpg", buffer.tobytes(), "image/jpeg")},
             timeout=15,
@@ -54,10 +53,10 @@ def _send_photo(
         return True
     except requests.RequestException as e:
         print(f"[{_now()}] ❌ Telegram photo error: {e}")
-        return _send_text(caption, to_chat_id)
+        return _send_text(config, caption, to_chat_id)
 
 
-def poll_commands(offset: int) -> tuple[list[tuple[str, str]], int]:
+def poll_commands(config: Config, offset: int) -> tuple[list[tuple[str, str]], int]:
     """
     Poll Telegram getUpdates (non-blocking, timeout=0).
 
@@ -67,7 +66,7 @@ def poll_commands(offset: int) -> tuple[list[tuple[str, str]], int]:
     try:
         # POST is accepted by the Bot API and avoids params serialisation issues
         r = requests.post(
-            f"https://api.telegram.org/bot{_TOKEN}/getUpdates",
+            f"https://api.telegram.org/bot{config.telegram_token}/getUpdates",
             json={"offset": offset, "timeout": 0, "allowed_updates": ["message"]},
             timeout=5,
         )
@@ -97,6 +96,7 @@ def poll_commands(offset: int) -> tuple[list[tuple[str, str]], int]:
 
 
 def send_status_reply(
+    config: Config,
     to_chat_id: str,
     frame: np.ndarray | None,
     on_floor_since: datetime | None,
@@ -111,25 +111,28 @@ def send_status_reply(
         status_line = "✅ <b>Nonno sta bene.</b>"
 
     caption = f"{status_line}\n🕐 {_now()}"
-    return _send_photo(frame, caption, to_chat_id)
+    return _send_photo(config, frame, caption, to_chat_id)
 
 
-def send_fall_alert(minutes_on_floor: float, frame: np.ndarray | None = None) -> bool:
+def send_fall_alert(
+    config: Config, minutes_on_floor: float, frame: np.ndarray | None = None
+) -> bool:
     caption = (
         f"🚨 <b>ATTENZIONE — Nonno a terra!</b>\n\n"
         f"A terra da <b>{minutes_on_floor:.0f} minuti</b>. Controllare subito!\n\n"
         f"🕐 {_now()}"
     )
-    return _send_photo(frame, caption)
+    return _send_photo(config, frame, caption)
 
 
-def send_all_clear(frame: np.ndarray | None = None) -> bool:
+def send_all_clear(config: Config, frame: np.ndarray | None = None) -> bool:
     caption = f"✅ <b>Tutto ok</b> — il nonno si è rialzato.\n🕐 {_now()}"
-    return _send_photo(frame, caption)
+    return _send_photo(config, frame, caption)
 
 
-def send_startup() -> bool:
+def send_startup(config: Config) -> bool:
     return _send_text(
+        config,
         "👋 <b>OcchioSuNonno attivo!</b>\nIl sistema di monitoraggio è operativo. 🟢\n"
-        "Invia /status per ricevere uno screenshot live."
+        "Invia /status per ricevere uno screenshot live.",
     )
