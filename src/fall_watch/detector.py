@@ -26,26 +26,26 @@ def _is_lying_down(kps: np.ndarray, frame_height: int) -> bool:
     spread horizontally than vertically, OR shoulders and hips are at a
     similar vertical level (flat body).
     """
-    points = [
+    left_shoulder, right_shoulder, left_hip, right_hip = (
         _keypoint(kps, _LEFT_SHOULDER),
         _keypoint(kps, _RIGHT_SHOULDER),
         _keypoint(kps, _LEFT_HIP),
         _keypoint(kps, _RIGHT_HIP),
-    ]
-    visible = [p for p in points if p is not None]
+    )
+    visible = [p for p in (left_shoulder, right_shoulder, left_hip, right_hip) if p is not None]
 
     if len(visible) < 2:
         return False
 
-    ys = [p[1] for p in visible]
-    xs = [p[0] for p in visible]
-    vertical_spread = max(ys) - min(ys)
-    horizontal_spread = max(xs) - min(xs)
+    y_coords = [p[1] for p in visible]
+    x_coords = [p[0] for p in visible]
+    vertical_spread = max(y_coords) - min(y_coords)
+    horizontal_spread = max(x_coords) - min(x_coords)
 
     is_horizontal = horizontal_spread > vertical_spread * 1.5
 
-    shoulder_ys = [p[1] for p in [points[0], points[1]] if p is not None]
-    hip_ys = [p[1] for p in [points[2], points[3]] if p is not None]
+    shoulder_ys = [p[1] for p in (left_shoulder, right_shoulder) if p is not None]
+    hip_ys = [p[1] for p in (left_hip, right_hip) if p is not None]
 
     is_flat = (
         bool(shoulder_ys and hip_ys)
