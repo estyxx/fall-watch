@@ -129,7 +129,7 @@ def send_fall_alert(minutes_on_floor: float, frame: np.ndarray | None = None) ->
 
 def send_all_clear(frame: np.ndarray | None = None) -> bool:
     caption = f"✅ <b>Tutto ok</b> — il nonno si è rialzato.\n🕐 {_now()}"
-    return _send_photo(frame, caption) if frame is not None else _send_text(caption)
+    return _send_photo(frame, caption)
 
 
 def send_startup() -> bool:
