@@ -106,8 +106,12 @@ def main() -> None:
                 continue
 
             now = datetime.now()
-            analysis: FrameAnalysis = analyse_frame(model, frame, config.floor_roi)
+            analysis: FrameAnalysis = analyse_frame(
+                model, frame, floor_roi=config.floor_roi, bed_polygon=config.bed_roi
+            )
             watcher.observe(analysis.person_on_floor, frame, now)
+            if analysis.person_climbing_out:
+                logger.info("🪜 Climb-out posture detected (no alert yet — wiring lands next)")
 
             time.sleep(config.frame_interval_seconds)
     finally:

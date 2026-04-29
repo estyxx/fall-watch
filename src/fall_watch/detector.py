@@ -13,11 +13,14 @@ _LEFT_SHOULDER = 5
 _RIGHT_SHOULDER = 6
 _LEFT_HIP = 11
 _RIGHT_HIP = 12
+_LEFT_ANKLE = 15
+_RIGHT_ANKLE = 16
 
 
 @dataclass(frozen=True)
 class FrameAnalysis:
     person_on_floor: bool
+    person_climbing_out: bool
 
 
 def load_model() -> YOLO:
@@ -82,6 +85,47 @@ def _hip_in_zone(kps: np.ndarray, polygon: tuple[tuple[int, int], ...]) -> bool:
     return False
 
 
+def _is_climbing_out(
+    kps: np.ndarray,
+    frame_height: int,
+    bed_polygon: tuple[tuple[int, int], ...] | None,
+) -> bool:
+    """Heuristic: person is climbing over the bedrail when posture is upright,
+    a hip is inside the bed polygon, and at least one ankle is outside it."""
+    if bed_polygon is None:
+        return False
+
+    visible_shoulders = [
+        p for i in (_LEFT_SHOULDER, _RIGHT_SHOULDER) if (p := _keypoint(kps, i)) is not None
+    ]
+    visible_hips = [p for i in (_LEFT_HIP, _RIGHT_HIP) if (p := _keypoint(kps, i)) is not None]
+    visible_ankles = [
+        p for i in (_LEFT_ANKLE, _RIGHT_ANKLE) if (p := _keypoint(kps, i)) is not None
+    ]
+
+    if not (visible_shoulders and visible_hips and visible_ankles):
+        return False
+
+    mean_shoulder_y = float(np.mean([s[1] for s in visible_shoulders]))
+    mean_hip_y = float(np.mean([h[1] for h in visible_hips]))
+
+    # In image coords, smaller y = higher up. Upright means shoulders well above hips.
+    is_upright = (mean_hip_y - mean_shoulder_y) > frame_height * 0.10
+    if not is_upright:
+        return False
+
+    bed_contour = np.array(bed_polygon, dtype=np.int32)
+    hip_inside = any(
+        cv2.pointPolygonTest(bed_contour, (float(h[0]), float(h[1])), False) >= 0
+        for h in visible_hips
+    )
+    ankle_outside = any(
+        cv2.pointPolygonTest(bed_contour, (float(a[0]), float(a[1])), False) < 0
+        for a in visible_ankles
+    )
+    return hip_inside and ankle_outside
+
+
 def _keypoints_array(result: Results) -> np.ndarray:
     """Return all person keypoints as a numpy array, handling the Tensor | ndarray union."""
     assert result.keypoints is not None
@@ -95,19 +139,31 @@ def analyse_frame(
     model: YOLO,
     frame: np.ndarray,
     floor_roi: tuple[tuple[int, int], ...] | None = None,
+    bed_polygon: tuple[tuple[int, int], ...] | None = None,
 ) -> FrameAnalysis:
     """Analyse one frame and return signals derived from pose estimation.
 
-    If `floor_roi` is provided, only detections whose hips fall inside the
-    polygon count as on-floor — this excludes the bed and any off-floor zones.
+    Runs YOLO once; both signals are derived from the same inference result.
+    If `floor_roi` is provided, on-floor detection is restricted to that zone.
+    If `bed_polygon` is provided, climb-out detection is active.
     """
     results: list[Results] = model(frame, verbose=False)
 
-    person_on_floor = any(
-        _is_lying_down(person_kps, frame.shape[0])
-        and (floor_roi is None or _hip_in_zone(person_kps, floor_roi))
-        for result in results
-        if result.keypoints is not None
-        for person_kps in _keypoints_array(result)
+    person_on_floor = False
+    person_climbing_out = False
+
+    for result in results:
+        if result.keypoints is None:
+            continue
+        for person_kps in _keypoints_array(result):
+            if not person_on_floor:
+                person_on_floor = _is_lying_down(person_kps, frame.shape[0]) and (
+                    floor_roi is None or _hip_in_zone(person_kps, floor_roi)
+                )
+            if not person_climbing_out:
+                person_climbing_out = _is_climbing_out(person_kps, frame.shape[0], bed_polygon)
+
+    return FrameAnalysis(
+        person_on_floor=person_on_floor,
+        person_climbing_out=person_climbing_out,
     )
-    return FrameAnalysis(person_on_floor=person_on_floor)
