@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -12,6 +13,11 @@ _LEFT_SHOULDER = 5
 _RIGHT_SHOULDER = 6
 _LEFT_HIP = 11
 _RIGHT_HIP = 12
+
+
+@dataclass(frozen=True)
+class FrameAnalysis:
+    person_on_floor: bool
 
 
 def load_model() -> YOLO:
@@ -89,18 +95,19 @@ def analyse_frame(
     model: YOLO,
     frame: np.ndarray,
     floor_roi: tuple[tuple[int, int], ...] | None = None,
-) -> bool:
-    """Return True if any person in the frame appears to be lying on the floor.
+) -> FrameAnalysis:
+    """Analyse one frame and return signals derived from pose estimation.
 
     If `floor_roi` is provided, only detections whose hips fall inside the
-    polygon count — this excludes the bed and any other off-floor zones.
+    polygon count as on-floor — this excludes the bed and any off-floor zones.
     """
     results: list[Results] = model(frame, verbose=False)
 
-    return any(
+    person_on_floor = any(
         _is_lying_down(person_kps, frame.shape[0])
         and (floor_roi is None or _hip_in_zone(person_kps, floor_roi))
         for result in results
         if result.keypoints is not None
         for person_kps in _keypoints_array(result)
     )
+    return FrameAnalysis(person_on_floor=person_on_floor)

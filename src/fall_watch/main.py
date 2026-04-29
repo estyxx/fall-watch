@@ -13,7 +13,7 @@ load_dotenv()
 import cv2  # noqa: E402
 
 from fall_watch.config import Config  # noqa: E402
-from fall_watch.detector import analyse_frame, load_model  # noqa: E402
+from fall_watch.detector import FrameAnalysis, analyse_frame, load_model  # noqa: E402
 from fall_watch.fall_watcher import FallWatcher  # noqa: E402
 from fall_watch.notifier import Notifier, TelegramNotifier  # noqa: E402
 
@@ -106,8 +106,8 @@ def main() -> None:
                 continue
 
             now = datetime.now()
-            person_on_floor = analyse_frame(model, frame, config.floor_roi)
-            watcher.observe(person_on_floor, frame, now)
+            analysis: FrameAnalysis = analyse_frame(model, frame, config.floor_roi)
+            watcher.observe(analysis.person_on_floor, frame, now)
 
             time.sleep(config.frame_interval_seconds)
     finally:
