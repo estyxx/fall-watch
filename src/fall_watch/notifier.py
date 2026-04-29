@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -6,6 +7,8 @@ import numpy as np
 import requests
 
 from fall_watch.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -23,7 +26,7 @@ def _send_text(config: Config, text: str, to_chat_id: str | None = None) -> bool
         r.raise_for_status()
         return True
     except requests.RequestException as e:
-        print(f"[{_now()}] ❌ Telegram error: {e}")
+        logger.error("❌ Telegram error: %s", e)
         return False
 
 
@@ -52,7 +55,7 @@ def _send_photo(
         r.raise_for_status()
         return True
     except requests.RequestException as e:
-        print(f"[{_now()}] ❌ Telegram photo error: {e}")
+        logger.error("❌ Telegram photo error: %s", e)
         return _send_text(config, caption, to_chat_id)
 
 
@@ -73,7 +76,7 @@ def poll_commands(config: Config, offset: int) -> tuple[list[tuple[str, str]], i
         r.raise_for_status()
         data: Any = r.json()  # untyped Bot API response
     except requests.RequestException as e:
-        print(f"[{_now()}] ❌ Telegram poll error: {e}")
+        logger.error("❌ Telegram poll error: %s", e)
         return [], offset
 
     commands: list[tuple[str, str]] = []
@@ -131,8 +134,10 @@ def send_all_clear(config: Config, frame: np.ndarray | None = None) -> bool:
 
 
 def send_startup(config: Config) -> bool:
-    return _send_text(
+    sent = _send_text(
         config,
         "👋 <b>OcchioSuNonno attivo!</b>\nIl sistema di monitoraggio è operativo. 🟢\n"
         "Invia /status per ricevere uno screenshot live.",
     )
+    logger.info("✅ Startup message sent")
+    return sent

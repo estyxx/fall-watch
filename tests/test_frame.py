@@ -11,11 +11,14 @@ Shows:
 """
 
 import argparse
+import logging
 from pathlib import Path
 
 import cv2
 
 from fall_watch.detector import _is_lying_down, load_model
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -31,20 +34,21 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
     args = _parse_args()
     image_path: Path = args.image
 
     if not image_path.exists():
-        print(f"❌ File not found: {image_path}")
+        logger.error("❌ File not found: %s", image_path)
         raise SystemExit(1)
 
     frame = cv2.imread(str(image_path))
     if frame is None:
-        print(f"❌ Could not read image: {image_path}")
+        logger.error("❌ Could not read image: %s", image_path)
         raise SystemExit(1)
 
-    print(f"📷 Image: {image_path.name} ({frame.shape[1]}x{frame.shape[0]}px)")
-    print("🔍 Running YOLOv8 pose detection...")
+    logger.info("📷 Image: %s (%dx%dpx)", image_path.name, frame.shape[1], frame.shape[0])
+    logger.info("🔍 Running YOLOv8 pose detection...")
 
     model = load_model()
     results = model(frame, verbose=False)
@@ -71,7 +75,7 @@ def main() -> None:
             status = "⚠ ON FLOOR" if on_floor else "ok"
             conf = f"{confidences[i]:.0%}" if i < len(confidences) else "?"
 
-            print(f"  Person {people_found}: {status} (confidence: {conf})")
+            logger.info("  Person %d: %s (confidence: %s)", people_found, status, conf)
 
             # Bounding box
             if i < len(boxes):
@@ -125,7 +129,7 @@ def main() -> None:
                         )
 
     if people_found == 0:
-        print("  No people detected in this frame")
+        logger.info("  No people detected in this frame")
         cv2.putText(
             display,
             "No person detected",
@@ -136,7 +140,7 @@ def main() -> None:
             2,
         )
     else:
-        print(f"\n✅ {people_found} person(s) detected, {people_on_floor} on floor")
+        logger.info("✅ %d person(s) detected, %d on floor", people_found, people_on_floor)
 
     # Scale down for display if image is large
     h, w = display.shape[:2]
@@ -145,7 +149,7 @@ def main() -> None:
         scale = max_dim / max(h, w)
         display = cv2.resize(display, (int(w * scale), int(h * scale)))
 
-    print("\nPress Q or Esc in the image window to quit.")
+    logger.info("Press Q or Esc in the image window to quit.")
     cv2.imshow(f"fall-watch — {image_path.name} (Q to quit)", display)
     while True:
         key = cv2.waitKey(100) & 0xFF

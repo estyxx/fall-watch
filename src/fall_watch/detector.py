@@ -1,6 +1,10 @@
+import logging
+
 import numpy as np
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
+
+logger = logging.getLogger(__name__)
 
 # COCO keypoint indices
 _LEFT_SHOULDER = 5
@@ -11,7 +15,9 @@ _RIGHT_HIP = 12
 
 def load_model() -> YOLO:
     """Load YOLOv8 nano pose model — downloads ~6MB on first run."""
-    return YOLO("yolov8n-pose.pt")
+    model = YOLO("yolov8n-pose.pt")
+    logger.info("✅ AI model loaded")
+    return model
 
 
 def _keypoint(kps: np.ndarray, idx: int, min_conf: float = 0.3) -> np.ndarray | None:
