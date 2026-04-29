@@ -15,6 +15,7 @@ class Notifier(Protocol):
     def send_startup(self) -> bool: ...
     def send_fall_alert(self, minutes_on_floor: float, frame: np.ndarray | None = None) -> bool: ...
     def send_all_clear(self, frame: np.ndarray | None = None) -> bool: ...
+    def send_climbing_alert(self, frame: np.ndarray | None = None) -> bool: ...
     def send_status_reply(
         self, chat_id: str, frame: np.ndarray | None, on_floor_since: datetime | None
     ) -> bool: ...
@@ -136,6 +137,14 @@ class TelegramNotifier:
 
     def send_all_clear(self, frame: np.ndarray | None = None) -> bool:
         caption = f"✅ <b>Tutto ok</b> — il nonno si è rialzato.\n🕐 {self._now()}"
+        return self._send_photo(frame, caption)
+
+    def send_climbing_alert(self, frame: np.ndarray | None = None) -> bool:
+        caption = (
+            f"🚨 <b>ATTENZIONE — Nonno sta scavalcando la sponda!</b>\n\n"
+            f"Controllare subito.\n\n"
+            f"🕐 {self._now()}"
+        )
         return self._send_photo(frame, caption)
 
     def send_startup(self) -> bool:

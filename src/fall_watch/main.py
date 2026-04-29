@@ -12,6 +12,7 @@ load_dotenv()
 
 import cv2  # noqa: E402
 
+from fall_watch.climb_watcher import ClimbWatcher  # noqa: E402
 from fall_watch.config import Config  # noqa: E402
 from fall_watch.detector import FrameAnalysis, analyse_frame, load_model  # noqa: E402
 from fall_watch.fall_watcher import FallWatcher  # noqa: E402
@@ -91,6 +92,7 @@ def main() -> None:
     model = load_model()
     notifier = TelegramNotifier(config)
     watcher = FallWatcher(config, notifier)
+    climb_watcher = ClimbWatcher(config, notifier)
     notifier.send_startup()
     cap = _open_stream(config.rtsp_url)
 
@@ -110,8 +112,7 @@ def main() -> None:
                 model, frame, floor_roi=config.floor_roi, bed_polygon=config.bed_roi
             )
             watcher.observe(analysis.person_on_floor, frame, now)
-            if analysis.person_climbing_out:
-                logger.info("🪜 Climb-out posture detected (no alert yet — wiring lands next)")
+            climb_watcher.observe(analysis.person_climbing_out, frame, now)
 
             time.sleep(config.frame_interval_seconds)
     finally:
