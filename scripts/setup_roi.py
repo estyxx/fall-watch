@@ -1,14 +1,14 @@
 """
 Interactive ROI (Region of Interest) setup tool.
 
-Click 4 points to define the floor zone — the area where a fall
-would actually happen. The bed and furniture will be excluded.
+Click 4 points to define the floor or bed zone visible from the camera.
 
 Usage:
-    uv run python scripts/setup_roi.py path/to/image.jpg
+    uv run python scripts/setup_roi.py image.jpg                  # captures FLOOR_ROI (default)
+    uv run python scripts/setup_roi.py image.jpg --zone bed       # captures BED_ROI
 
 Controls:
-    - On startup: any existing FLOOR_ROI from .env is loaded and shown
+    - On startup: any existing ROI for the selected zone is loaded and shown
     - Left click: add a point (up to 4)
     - R: reset points
     - Enter: confirm and save to .env
@@ -31,9 +31,15 @@ logger = logging.getLogger(__name__)
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Interactively define the floor ROI by clicking 4 points on an image."
+        description="Interactively define a floor or bed ROI by clicking 4 points on an image."
     )
     parser.add_argument("image", type=Path, help="Path to a reference frame from the camera")
+    parser.add_argument(
+        "--zone",
+        choices=["floor", "bed"],
+        default="floor",
+        help="Which ROI to capture (default: floor, preserves backwards compat).",
+    )
     return parser.parse_args()
 
 
@@ -42,6 +48,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
     args = _parse_args()
     image_path: Path = args.image
+    env_var = f"{args.zone.upper()}_ROI"
 
     if not image_path.exists():
         logger.error("❌ File not found: %s", image_path)
@@ -61,22 +68,23 @@ def main() -> None:
 
     points: list[tuple[int, int]] = []
     try:
-        saved = parse_polygon(os.getenv("FLOOR_ROI"))
+        saved = parse_polygon(os.getenv(env_var))
         if saved is not None:
             points = [(int(x * scale), int(y * scale)) for x, y in saved]
             logger.info(
-                "📐 Loaded existing FLOOR_ROI (%d points) — R to reset, Q to keep unchanged",
+                "📐 Loaded existing %s (%d points) — R to reset, Q to keep unchanged",
+                env_var,
                 len(points),
             )
     except ValueError as e:
-        logger.warning("⚠️  Ignoring malformed FLOOR_ROI in .env: %s", e)
+        logger.warning("⚠️  Ignoring malformed %s in .env: %s", env_var, e)
 
     def draw() -> np.ndarray:
         img = display_base.copy()
 
         # Instructions overlay
         instructions = [
-            "Click 4 points to define the FLOOR zone",
+            f"Click 4 points to define the {args.zone.upper()} zone",
             "R = reset | Enter = save | Q = quit",
             f"Points: {len(points)}/4",
         ]
@@ -126,7 +134,7 @@ def main() -> None:
             points.append((x, y))
             cv2.imshow(win, draw())
 
-    win = "fall-watch — ROI setup (floor zone)"
+    win = f"fall-watch — ROI setup ({args.zone} zone)"
     cv2.namedWindow(win)
     cv2.setMouseCallback(win, on_click)
     cv2.imshow(win, draw())
@@ -151,19 +159,19 @@ def main() -> None:
             env_path = Path(".env")
             if env_path.exists():
                 existing = env_path.read_text()
-                if "FLOOR_ROI" in existing:
+                if env_var in existing:
                     lines = [
-                        f"FLOOR_ROI={roi_str}" if line.startswith("FLOOR_ROI") else line
+                        f"{env_var}={roi_str}" if line.startswith(f"{env_var}=") else line
                         for line in existing.splitlines()
                     ]
                     env_path.write_text("\n".join(lines) + "\n")
                 else:
                     with env_path.open("a") as f:
-                        f.write(f"\nFLOOR_ROI={roi_str}\n")
+                        f.write(f"\n{env_var}={roi_str}\n")
             else:
-                env_path.write_text(f"FLOOR_ROI={roi_str}\n")
+                env_path.write_text(f"{env_var}={roi_str}\n")
 
-            logger.info("✅ ROI saved to .env: FLOOR_ROI=%s", roi_str)
+            logger.info("✅ ROI saved to .env: %s=%s", env_var, roi_str)
             logger.info("   Points (original resolution): %s", real_points)
             break
 

@@ -22,8 +22,9 @@ uv sync                                   # install all deps (including dev)
 uv run fall-watch                         # run the monitor
 uv run python tests/test_detector.py      # integration test: webcam + detection + Telegram
 uv run python tests/test_telegram.py      # Telegram-only smoke test (no camera needed)
-uv run python tests/test_frame.py image.jpg    # test detection on a static image
-uv run python scripts/setup_roi.py image.jpg   # interactive floor ROI setup (click 4 points)
+uv run python tests/test_frame.py image.jpg                 # test detection on a static image
+uv run python scripts/setup_roi.py image.jpg --zone floor   # capture FLOOR_ROI
+uv run python scripts/setup_roi.py image.jpg --zone bed     # capture BED_ROI
 
 uv run ruff check src/ tests/            # lint
 uv run ruff format src/                  # format
