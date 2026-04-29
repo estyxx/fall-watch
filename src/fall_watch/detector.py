@@ -1,5 +1,6 @@
 import logging
 
+import cv2
 import numpy as np
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
@@ -61,6 +62,20 @@ def _is_lying_down(kps: np.ndarray, frame_height: int) -> bool:
     return is_horizontal or is_flat
 
 
+def _hip_in_zone(kps: np.ndarray, polygon: tuple[tuple[int, int], ...]) -> bool:
+    """True if at least one visible hip keypoint is inside the polygon.
+
+    Fails safe: returns False when no hip keypoints are visible, so an
+    ambiguous frame never triggers a false positive in bed.
+    """
+    contour = np.array(polygon, dtype=np.int32)
+    for idx in (_LEFT_HIP, _RIGHT_HIP):
+        if (point := _keypoint(kps, idx)) is not None:
+            if cv2.pointPolygonTest(contour, (float(point[0]), float(point[1])), False) >= 0:
+                return True
+    return False
+
+
 def _keypoints_array(result: Results) -> np.ndarray:
     """Return all person keypoints as a numpy array, handling the Tensor | ndarray union."""
     assert result.keypoints is not None
@@ -70,12 +85,21 @@ def _keypoints_array(result: Results) -> np.ndarray:
     return data.cpu().numpy()
 
 
-def analyse_frame(model: YOLO, frame: np.ndarray) -> bool:
-    """Return True if any person in the frame appears to be lying on the floor."""
+def analyse_frame(
+    model: YOLO,
+    frame: np.ndarray,
+    floor_roi: tuple[tuple[int, int], ...] | None = None,
+) -> bool:
+    """Return True if any person in the frame appears to be lying on the floor.
+
+    If `floor_roi` is provided, only detections whose hips fall inside the
+    polygon count — this excludes the bed and any other off-floor zones.
+    """
     results: list[Results] = model(frame, verbose=False)
 
     return any(
         _is_lying_down(person_kps, frame.shape[0])
+        and (floor_roi is None or _hip_in_zone(person_kps, floor_roi))
         for result in results
         if result.keypoints is not None
         for person_kps in _keypoints_array(result)

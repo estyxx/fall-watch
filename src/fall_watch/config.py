@@ -11,6 +11,7 @@ class Config:
     alert_cooldown_minutes: float = 15.0
     frame_interval_seconds: int = 5
     not_on_floor_streak_max: int = 3
+    floor_roi: tuple[tuple[int, int], ...] | None = None
 
     @classmethod
     def load(cls) -> "Config":
@@ -22,4 +23,23 @@ class Config:
             alert_cooldown_minutes=float(os.getenv("ALERT_COOLDOWN_MINUTES", "15")),
             frame_interval_seconds=int(os.getenv("FRAME_INTERVAL_SECONDS", "5")),
             not_on_floor_streak_max=int(os.getenv("NOT_ON_FLOOR_STREAK_MAX", "3")),
+            floor_roi=_parse_polygon(os.getenv("FLOOR_ROI")),
         )
+
+
+def _parse_polygon(raw: str | None) -> tuple[tuple[int, int], ...] | None:
+    """Parse a polygon string of the form "x1,y1;x2,y2;...".
+
+    Returns None for empty/missing input. Raises ValueError for malformed input
+    so misconfiguration fails loudly at startup rather than silently disabling
+    the ROI.
+    """
+    if not raw:
+        return None
+    points: list[tuple[int, int]] = []
+    for pair in raw.split(";"):
+        x_str, y_str = pair.split(",")
+        points.append((int(x_str.strip()), int(y_str.strip())))
+    if len(points) < 3:
+        raise ValueError(f"Polygon needs at least 3 points, got {len(points)}: {raw!r}")
+    return tuple(points)

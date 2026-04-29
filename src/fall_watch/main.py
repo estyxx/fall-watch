@@ -106,7 +106,7 @@ def main() -> None:
                 continue
 
             now = datetime.now()
-            person_on_floor = analyse_frame(model, frame)
+            person_on_floor = analyse_frame(model, frame, config.floor_roi)
             watcher.observe(person_on_floor, frame, now)
 
             time.sleep(config.frame_interval_seconds)

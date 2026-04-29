@@ -71,8 +71,10 @@ Do not mix them.
 - **Alert cooldown:** once alerted, wait `ALERT_COOLDOWN_MINUTES` (default 15 min)
   before alerting again, to avoid spam
 - **Photo alerts:** both fall alert and all-clear include a JPEG snapshot, not just text
-- **Floor ROI:** a configurable polygon zone (`ROI_POINTS` env var) restricts
-  detection to the floor area, excluding the bed to avoid false positives
+- **Floor ROI:** a configurable polygon zone (`FLOOR_ROI` env var) restricts
+  detection to the floor area, excluding the bed to avoid false positives;
+  format: `"x1,y1;x2,y2;x3,y3;x4,y4"` — captured via `scripts/setup_roi.py`;
+  only counts as "on floor" when at least one hip keypoint is inside the polygon
 - **/status command:** family can send `/status` to the Telegram group at any time
   to get a live screenshot and current state
 
