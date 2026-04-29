@@ -7,7 +7,9 @@ This file is read by Claude Code. Follow everything here precisely.
 ## Project overview
 
 `fall-watch` monitors an RTSP camera stream and alerts a Telegram group when a
-person has been lying on the floor for too long. It runs 24/7 on a Raspberry Pi.
+person has been lying on the floor for too long. It runs 24/7 on a Raspberry Pi 5.
+
+Alerts go to a private family Telegram group. Camera: EZVIZ, accessed via RTSP.
 
 **Stack:** Python 3.13 · YOLOv8-pose · OpenCV · Telegram Bot API · uv · ruff · mypy
 
@@ -16,14 +18,17 @@ person has been lying on the floor for too long. It runs 24/7 on a Raspberry Pi.
 ## Commands
 
 ```bash
-uv sync                        # install all deps (including dev)
-uv run fall-watch              # run the monitor
-uv run python tests/test_telegram.py  # smoke-test Telegram without a camera
+uv sync                                   # install all deps (including dev)
+uv run fall-watch                         # run the monitor
+uv run python tests/test_detector.py      # integration test: webcam + detection + Telegram
+uv run python tests/test_telegram.py      # Telegram-only smoke test (no camera needed)
+uv run python tests/test_frame.py image.jpg    # test detection on a static image
+uv run python scripts/setup_roi.py image.jpg   # interactive floor ROI setup (click 4 points)
 
-uv run ruff check src/         # lint
-uv run ruff format src/        # format
-uv run mypy src/               # type check
-uv run pytest                  # run tests
+uv run ruff check src/ tests/            # lint
+uv run ruff format src/                  # format
+uv run mypy src/                         # type check
+uv run pytest                            # run tests
 ```
 
 Always run `ruff check` and `mypy` before finishing any task. Fix all warnings —
@@ -35,15 +40,41 @@ do not suppress them unless there is a very good reason, and if so, leave a comm
 
 ```
 src/fall_watch/
-├── main.py       # entry point, main loop, state machine
-├── detector.py   # YOLOv8 model loading + pose analysis logic
-└── notifier.py   # Telegram message sending
+├── main.py       # entry point, main loop, state machine (match/case)
+├── config.py     # Config dataclass, all env-var loading
+├── detector.py   # YOLOv8 model + lying-down heuristic + ROI support
+└── notifier.py   # Telegram sendMessage / sendPhoto / poll_commands
+
 tests/
-└── test_telegram.py  # manual smoke test (not pytest)
+├── test_detector.py   # integration test: webcam + detection + Telegram
+├── test_telegram.py   # Telegram-only smoke test (no camera needed)
+└── test_frame.py      # test detection on a single static image
+
+scripts/
+└── setup_roi.py       # interactive floor ROI setup tool (click 4 points)
 ```
 
-Keep these three concerns strictly separated. `main.py` orchestrates,
-`detector.py` does vision, `notifier.py` does IO. Do not mix them.
+Keep these four concerns strictly separated. `main.py` orchestrates, `config.py`
+owns all configuration, `detector.py` does vision, `notifier.py` does IO.
+Do not mix them.
+
+---
+
+## Key design decisions
+
+- **Frame interval:** analyse one frame every 5 seconds (`FRAME_INTERVAL_SECONDS`)
+  to keep CPU load manageable on the Pi
+- **Hysteresis:** require 3 consecutive "not on floor" frames (`NOT_ON_FLOOR_STREAK_MAX`)
+  before sending an all-clear, to avoid flapping on ambiguous detections
+- **Fall threshold:** alert only fires after `FALL_THRESHOLD_MINUTES` (default 3 min)
+  continuously on the floor
+- **Alert cooldown:** once alerted, wait `ALERT_COOLDOWN_MINUTES` (default 15 min)
+  before alerting again, to avoid spam
+- **Photo alerts:** both fall alert and all-clear include a JPEG snapshot, not just text
+- **Floor ROI:** a configurable polygon zone (`ROI_POINTS` env var) restricts
+  detection to the floor area, excluding the bed to avoid false positives
+- **/status command:** family can send `/status` to the Telegram group at any time
+  to get a live screenshot and current state
 
 ---
 
@@ -131,7 +162,8 @@ clear. Avoid them when they become hard to read — a loop is fine.
 ### Error handling
 
 - Catch specific exceptions, never bare `except:`
-- Log errors with context (`_log(f"❌ Failed: {e}")`) before re-raising or recovering
+- Log errors with context (e.g. `logger.error("❌ Failed: %s", e)`) before re-raising
+  or recovering
 - For camera disconnects and Telegram failures, the code should retry gracefully —
   a transient failure must not crash the whole monitor
 
@@ -141,12 +173,14 @@ clear. Avoid them when they become hard to read — a loop is fine.
 - `os.environ["KEY"]` for required values (raises clearly if missing)
 - `os.getenv("KEY", "default")` for optional values with a default
 - Never hardcode IPs, tokens, thresholds, or any deployment-specific value
+- All env-var loading lives in `config.py` — nowhere else
 
 ### Logging
 
-Use the `_log()` helper in `main.py` — it prefixes every line with a timestamp.
-Do not use `print()` directly outside of scripts. Do not add a full logging
-framework unless the project grows substantially.
+Use the standard `logging` module via `logging.getLogger(__name__)`. The root
+logger is configured in `main.py` (`_setup_logging()`) with a console handler
+and a daily-rotating file handler. Do not use `print()` directly outside of
+scripts. Do not add extra logging frameworks unless the project grows substantially.
 
 ---
 
@@ -183,8 +217,8 @@ Then inject it into `main()` rather than importing the Telegram functions direct
 
 ## Raspberry Pi notes
 
+- Target hardware: Raspberry Pi 5 (4 GB)
 - Python 3.13 must be installed via `uv` (it manages its own Python builds)
 - Run as a systemd service — see `README.md` for the unit file
 - The YOLOv8 nano model (`yolov8n-pose.pt`) downloads automatically on first run
   and is cached locally; it is gitignored (`.pt` files)
-- Pi 4 (4GB) is sufficient; Pi 5 is faster if available
