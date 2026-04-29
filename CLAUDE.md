@@ -40,10 +40,12 @@ do not suppress them unless there is a very good reason, and if so, leave a comm
 
 ```
 src/fall_watch/
-├── main.py       # entry point, main loop, state machine (match/case)
-├── config.py     # Config dataclass, all env-var loading
-├── detector.py   # YOLOv8 model + lying-down heuristic + ROI support
-└── notifier.py   # Telegram sendMessage / sendPhoto / poll_commands
+├── main.py            # entry point, orchestration only (loop + command polling)
+├── config.py          # Config dataclass, env-var loading, polygon parsing
+├── detector.py        # YOLOv8 + per-person FrameAnalysis + lying-down / climbing heuristics
+├── fall_watcher.py    # FallWatcher state machine: timing, hysteresis, cooldown
+├── climb_watcher.py   # ClimbWatcher state machine: short-window threshold, cooldown
+└── notifier.py        # Notifier protocol + TelegramNotifier; alerts and command polling
 
 tests/
 ├── test_detector.py   # integration test: webcam + detection + Telegram
@@ -51,12 +53,12 @@ tests/
 └── test_frame.py      # test detection on a single static image
 
 scripts/
-└── setup_roi.py       # interactive floor ROI setup tool (click 4 points)
+└── setup_roi.py       # interactive ROI setup tool (floor or bed zone)
 ```
 
-Keep these four concerns strictly separated. `main.py` orchestrates, `config.py`
-owns all configuration, `detector.py` does vision, `notifier.py` does IO.
-Do not mix them.
+Keep these concerns strictly separated. `main.py` orchestrates, `config.py` owns
+configuration, `detector.py` does vision, the watchers own state machines,
+`notifier.py` does IO. Do not mix them.
 
 ---
 
@@ -75,6 +77,20 @@ Do not mix them.
   detection to the floor area, excluding the bed to avoid false positives;
   format: `"x1,y1;x2,y2;x3,y3;x4,y4"` — captured via `scripts/setup_roi.py`;
   only counts as "on floor" when at least one hip keypoint is inside the polygon
+- **Bed ROI:** parallel polygon zone (`BED_ROI` env var) defining where the bed is.
+  Used to gate climb-out detection — a hip inside this zone with an ankle outside
+  it is the climbing signal. Captured via `setup_roi.py --zone bed`. Same format
+  as `FLOOR_ROI`: `"x1,y1;x2,y2;x3,y3;x4,y4"`.
+- **Climb-out detection:** alerts when grandpa appears to be climbing over the
+  bedrail. Heuristic: posture upright (shoulders meaningfully above hips), at
+  least one hip inside `BED_ROI`, at least one ankle outside it. Fires after
+  `CLIMB_THRESHOLD_SECONDS` (default 10) of consecutive detections, with a
+  cooldown of `CLIMB_ALERT_COOLDOWN_MINUTES` (default 5). No all-clear —
+  climbing is a one-shot warning, not a sustained state.
+- **One inference, two signals:** `analyse_frame` runs YOLO once per call and
+  returns a `FrameAnalysis(people=tuple[PersonDetection, ...])` with both
+  `on_floor` and `climbing_out` set per person. Both watchers consume the same
+  analysis — never two model runs per frame.
 - **/status command:** family can send `/status` to the Telegram group at any time
   to get a live screenshot and current state
 
@@ -201,19 +217,10 @@ scripts. Do not add extra logging frameworks unless the project grows substantia
 
 ## Adding a new notification channel
 
-`notifier.py` currently supports Telegram only. If adding another channel
-(e.g. email, PagerDuty), extract a `Notifier` protocol:
-
-```python
-from typing import Protocol
-
-class Notifier(Protocol):
-    def send_fall_alert(self, minutes: float) -> bool: ...
-    def send_all_clear(self) -> bool: ...
-    def send_startup(self) -> bool: ...
-```
-
-Then inject it into `main()` rather than importing the Telegram functions directly.
+`notifier.py` already exposes a `Notifier` `Protocol`. To add a channel, write a
+new class implementing it (e.g. `EmailNotifier`) and substitute it in `main.py`
+where `TelegramNotifier` is constructed. The watchers depend only on the protocol,
+so no other code needs to change.
 
 ---
 
