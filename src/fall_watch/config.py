@@ -26,14 +26,14 @@ class Config:
             alert_cooldown_minutes=float(os.getenv("ALERT_COOLDOWN_MINUTES", "15")),
             frame_interval_seconds=int(os.getenv("FRAME_INTERVAL_SECONDS", "5")),
             not_on_floor_streak_max=int(os.getenv("NOT_ON_FLOOR_STREAK_MAX", "3")),
-            floor_roi=_parse_polygon(os.getenv("FLOOR_ROI")),
-            bed_roi=_parse_polygon(os.getenv("BED_ROI")),
+            floor_roi=parse_polygon(os.getenv("FLOOR_ROI")),
+            bed_roi=parse_polygon(os.getenv("BED_ROI")),
             climb_threshold_seconds=int(os.getenv("CLIMB_THRESHOLD_SECONDS", "10")),
             climb_alert_cooldown_minutes=float(os.getenv("CLIMB_ALERT_COOLDOWN_MINUTES", "5")),
         )
 
 
-def _parse_polygon(raw: str | None) -> tuple[tuple[int, int], ...] | None:
+def parse_polygon(raw: str | None) -> tuple[tuple[int, int], ...] | None:
     """Parse a polygon string of the form "x1,y1;x2,y2;...".
 
     Returns None for empty/missing input. Raises ValueError for malformed input

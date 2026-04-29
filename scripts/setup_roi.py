@@ -8,6 +8,7 @@ Usage:
     uv run python scripts/setup_roi.py path/to/image.jpg
 
 Controls:
+    - On startup: any existing FLOOR_ROI from .env is loaded and shown
     - Left click: add a point (up to 4)
     - R: reset points
     - Enter: confirm and save to .env
@@ -16,10 +17,14 @@ Controls:
 
 import argparse
 import logging
+import os
 from pathlib import Path
 
 import cv2
 import numpy as np
+from dotenv import load_dotenv
+
+from fall_watch.config import parse_polygon
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_dotenv()
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
     args = _parse_args()
     image_path: Path = args.image
@@ -54,6 +60,16 @@ def main() -> None:
     display_base = cv2.resize(frame, (display_w, display_h))
 
     points: list[tuple[int, int]] = []
+    try:
+        saved = parse_polygon(os.getenv("FLOOR_ROI"))
+        if saved is not None:
+            points = [(int(x * scale), int(y * scale)) for x, y in saved]
+            logger.info(
+                "📐 Loaded existing FLOOR_ROI (%d points) — R to reset, Q to keep unchanged",
+                len(points),
+            )
+    except ValueError as e:
+        logger.warning("⚠️  Ignoring malformed FLOOR_ROI in .env: %s", e)
 
     def draw() -> np.ndarray:
         img = display_base.copy()
