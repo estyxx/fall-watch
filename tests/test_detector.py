@@ -18,13 +18,7 @@ import numpy as np  # noqa: E402
 
 from fall_watch.config import Config  # noqa: E402
 from fall_watch.detector import _is_lying_down, load_model  # noqa: E402
-from fall_watch.notifier import (  # noqa: E402
-    poll_commands,
-    send_all_clear,
-    send_fall_alert,
-    send_startup,
-    send_status_reply,
-)
+from fall_watch.notifier import TelegramNotifier  # noqa: E402
 
 FALL_THRESHOLD_SECONDS = 10  # shorter than production for testing
 ALERT_COOLDOWN_SECONDS = 30
@@ -41,6 +35,7 @@ def _log(msg: str) -> None:
 
 def main() -> None:
     config = Config.load()
+    notifier = TelegramNotifier(config)
     model = load_model()
     cap = cv2.VideoCapture(0)
 
@@ -49,7 +44,7 @@ def main() -> None:
         return
 
     _log("✅ Webcam open")
-    send_startup(config)
+    notifier.send_startup()
     _log("✅ Startup message sent to Telegram")
 
     on_floor_since: datetime | None = None
@@ -61,12 +56,12 @@ def main() -> None:
 
     while True:
         # --- Poll Telegram for commands ---
-        commands, update_offset = poll_commands(config, update_offset)
+        commands, update_offset = notifier.poll_commands(update_offset)
         for chat_id, cmd in commands:
             match cmd:
                 case "/status":
                     _log(f"📲 /status from chat {chat_id}")
-                    send_status_reply(config, chat_id, latest_frame, on_floor_since)
+                    notifier.send_status_reply(chat_id, latest_frame, on_floor_since)
                 case _:
                     _log(f"⚙️  Unknown command '{cmd}' — ignored")
 
@@ -122,7 +117,7 @@ def main() -> None:
 
             if seconds_on_floor >= FALL_THRESHOLD_SECONDS and cooldown_ok:
                 _log(f"🚨 Sending alert! On floor for {seconds_on_floor:.0f}s")
-                send_fall_alert(config, seconds_on_floor / 60, frame)
+                notifier.send_fall_alert(seconds_on_floor / 60, frame)
                 alert_sent_at = now
 
             remaining = max(0, FALL_THRESHOLD_SECONDS - seconds_on_floor)
@@ -149,7 +144,7 @@ def main() -> None:
                 if not_on_floor_streak >= NOT_ON_FLOOR_STREAK_MAX:
                     _log("✅ Got up — sending all clear")
                     if alert_sent_at is not None:
-                        send_all_clear(config, frame)
+                        notifier.send_all_clear(frame)
                     on_floor_since = None
                     alert_sent_at = None
                     was_on_floor = False

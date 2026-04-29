@@ -16,13 +16,7 @@ import numpy as np  # noqa: E402
 
 from fall_watch.config import Config  # noqa: E402
 from fall_watch.detector import analyse_frame, load_model  # noqa: E402
-from fall_watch.notifier import (  # noqa: E402
-    poll_commands,
-    send_all_clear,
-    send_fall_alert,
-    send_startup,
-    send_status_reply,
-)
+from fall_watch.notifier import Notifier, TelegramNotifier  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -87,20 +81,22 @@ def _reconnect(config: Config, cap: cv2.VideoCapture) -> cv2.VideoCapture:
         return cap
 
 
-def _handle_commands(config: Config, update_offset: int, state: FallState) -> int:
+def _handle_commands(notifier: Notifier, update_offset: int, state: FallState) -> int:
     """Poll Telegram for commands and reply to any /status requests."""
-    commands, new_offset = poll_commands(config, update_offset)
+    commands, new_offset = notifier.poll_commands(update_offset)
     for chat_id, cmd in commands:
         match cmd:
             case "/status":
                 logger.info("📲 /status requested by chat %s", chat_id)
-                send_status_reply(config, chat_id, state.latest_frame, state.on_floor_since)
+                notifier.send_status_reply(chat_id, state.latest_frame, state.on_floor_since)
             case _:
                 logger.warning("⚙️  Unknown command '%s' from chat %s — ignored", cmd, chat_id)
     return new_offset
 
 
-def _on_floor(config: Config, state: FallState, frame: np.ndarray, now: datetime) -> None:
+def _on_floor(
+    config: Config, notifier: Notifier, state: FallState, frame: np.ndarray, now: datetime
+) -> None:
     state.not_on_floor_streak = 0
 
     if state.on_floor_since is None:
@@ -115,13 +111,13 @@ def _on_floor(config: Config, state: FallState, frame: np.ndarray, now: datetime
 
     if minutes_on_floor >= config.fall_threshold_minutes and cooldown_ok:
         logger.warning("🚨 Alerting! On floor for %.1fmin", minutes_on_floor)
-        send_fall_alert(config, minutes_on_floor, frame)
+        notifier.send_fall_alert(minutes_on_floor, frame)
         state.alert_sent_at = now
 
     state.was_on_floor = True
 
 
-def _off_floor(config: Config, state: FallState) -> FallState:
+def _off_floor(config: Config, notifier: Notifier, state: FallState) -> FallState:
     if not state.was_on_floor:
         return state
 
@@ -133,7 +129,7 @@ def _off_floor(config: Config, state: FallState) -> FallState:
     if state.not_on_floor_streak >= config.not_on_floor_streak_max:
         logger.info("✅ Person got up")
         if state.alert_sent_at is not None:
-            send_all_clear(config, state.last_floor_frame)
+            notifier.send_all_clear(state.last_floor_frame)
         return FallState()
 
     return state
@@ -145,7 +141,8 @@ def main() -> None:
 
     config = Config.load()
     model = load_model()
-    send_startup(config)
+    notifier = TelegramNotifier(config)
+    notifier.send_startup()
     cap = _open_stream(config.rtsp_url)
 
     state = FallState()
@@ -153,7 +150,7 @@ def main() -> None:
 
     try:
         while True:
-            update_offset = _handle_commands(config, update_offset, state)
+            update_offset = _handle_commands(notifier, update_offset, state)
 
             ret, frame = cap.read()
             if not ret:
@@ -164,9 +161,9 @@ def main() -> None:
             now = datetime.now()
 
             if analyse_frame(model, frame):
-                _on_floor(config, state, frame, now)
+                _on_floor(config, notifier, state, frame, now)
             else:
-                state = _off_floor(config, state)
+                state = _off_floor(config, notifier, state)
 
             time.sleep(config.frame_interval_seconds)
     finally:

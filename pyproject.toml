@@ -70,6 +70,11 @@ warn_unused_configs = true
 mypy_path = "src"
 explicit_package_bases = true
 
+[[tool.mypy.overrides]]
+# ultralytics stubs do not declare YOLO in __all__; allow implicit re-exports
+module = ["ultralytics", "ultralytics.*"]
+no_implicit_reexport = false
+
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------

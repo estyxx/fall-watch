@@ -61,6 +61,15 @@ def _is_lying_down(kps: np.ndarray, frame_height: int) -> bool:
     return is_horizontal or is_flat
 
 
+def _keypoints_array(result: Results) -> np.ndarray:
+    """Return all person keypoints as a numpy array, handling the Tensor | ndarray union."""
+    assert result.keypoints is not None
+    data = result.keypoints.data
+    if isinstance(data, np.ndarray):
+        return data
+    return data.cpu().numpy()
+
+
 def analyse_frame(model: YOLO, frame: np.ndarray) -> bool:
     """Return True if any person in the frame appears to be lying on the floor."""
     results: list[Results] = model(frame, verbose=False)
@@ -69,5 +78,5 @@ def analyse_frame(model: YOLO, frame: np.ndarray) -> bool:
         _is_lying_down(person_kps, frame.shape[0])
         for result in results
         if result.keypoints is not None
-        for person_kps in result.keypoints.data.cpu().numpy()
+        for person_kps in _keypoints_array(result)
     )
