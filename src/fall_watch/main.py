@@ -111,8 +111,8 @@ def main() -> None:
             analysis: FrameAnalysis = analyse_frame(
                 model, frame, floor_roi=config.floor_roi, bed_polygon=config.bed_roi
             )
-            watcher.observe(analysis.person_on_floor, frame, now)
-            climb_watcher.observe(analysis.person_climbing_out, frame, now)
+            watcher.observe(analysis.any_on_floor, frame, now)
+            climb_watcher.observe(analysis.any_climbing_out, frame, now)
 
             time.sleep(config.frame_interval_seconds)
     finally:

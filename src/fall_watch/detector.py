@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import cv2
 import numpy as np
@@ -18,9 +19,29 @@ _RIGHT_ANKLE = 16
 
 
 @dataclass(frozen=True)
+class PersonDetection:
+    """Detection result for a single person in a frame."""
+
+    keypoints: np.ndarray  # shape (17, 3): x, y, confidence — read-only by convention
+    box: tuple[int, int, int, int]  # x1, y1, x2, y2 in original image coordinates
+    box_confidence: float
+    on_floor: bool
+    climbing_out: bool
+
+
+@dataclass(frozen=True)
 class FrameAnalysis:
-    person_on_floor: bool
-    person_climbing_out: bool
+    """All per-person detections derived from a single YOLO inference."""
+
+    people: tuple[PersonDetection, ...]
+
+    @property
+    def any_on_floor(self) -> bool:
+        return any(p.on_floor for p in self.people)
+
+    @property
+    def any_climbing_out(self) -> bool:
+        return any(p.climbing_out for p in self.people)
 
 
 def load_model() -> YOLO:
@@ -126,13 +147,24 @@ def _is_climbing_out(
     return hip_inside and ankle_outside
 
 
-def _keypoints_array(result: Results) -> np.ndarray:
-    """Return all person keypoints as a numpy array, handling the Tensor | ndarray union."""
-    assert result.keypoints is not None
-    data = result.keypoints.data
+def _is_person_on_floor(
+    person_kps: np.ndarray,
+    frame_height: int,
+    floor_roi: tuple[tuple[int, int], ...] | None,
+) -> bool:
+    if not _is_lying_down(person_kps, frame_height):
+        return False
+    if floor_roi is None:
+        return True
+    return _hip_in_zone(person_kps, floor_roi)
+
+
+def _to_numpy(data: Any) -> np.ndarray:  # Any: ultralytics returns Tensor | ndarray
+    """Convert a Tensor or ndarray to a numpy array."""
     if isinstance(data, np.ndarray):
         return data
-    return data.cpu().numpy()
+    arr: np.ndarray = data.cpu().numpy()
+    return arr
 
 
 def analyse_frame(
@@ -141,29 +173,32 @@ def analyse_frame(
     floor_roi: tuple[tuple[int, int], ...] | None = None,
     bed_polygon: tuple[tuple[int, int], ...] | None = None,
 ) -> FrameAnalysis:
-    """Analyse one frame and return signals derived from pose estimation.
+    """Run YOLO once on the frame and return a per-person analysis.
 
-    Runs YOLO once; both signals are derived from the same inference result.
-    If `floor_roi` is provided, on-floor detection is restricted to that zone.
-    If `bed_polygon` is provided, climb-out detection is active.
+    `on_floor` and `climbing_out` per person share the same inference result,
+    so callers always agree on what counts and the model runs exactly once.
     """
     results: list[Results] = model(frame, verbose=False)
-
-    person_on_floor = False
-    person_climbing_out = False
+    people: list[PersonDetection] = []
 
     for result in results:
-        if result.keypoints is None:
+        if result.keypoints is None or result.boxes is None:
             continue
-        for person_kps in _keypoints_array(result):
-            if not person_on_floor:
-                person_on_floor = _is_lying_down(person_kps, frame.shape[0]) and (
-                    floor_roi is None or _hip_in_zone(person_kps, floor_roi)
-                )
-            if not person_climbing_out:
-                person_climbing_out = _is_climbing_out(person_kps, frame.shape[0], bed_polygon)
 
-    return FrameAnalysis(
-        person_on_floor=person_on_floor,
-        person_climbing_out=person_climbing_out,
-    )
+        kps_array = _to_numpy(result.keypoints.data)
+        boxes_xyxy = _to_numpy(result.boxes.xyxy)
+        confidences = _to_numpy(result.boxes.conf)
+
+        for person_kps, box_xyxy, conf in zip(kps_array, boxes_xyxy, confidences, strict=True):
+            x1, y1, x2, y2 = (int(v) for v in box_xyxy)
+            people.append(
+                PersonDetection(
+                    keypoints=person_kps,
+                    box=(x1, y1, x2, y2),
+                    box_confidence=float(conf),
+                    on_floor=_is_person_on_floor(person_kps, frame.shape[0], floor_roi),
+                    climbing_out=_is_climbing_out(person_kps, frame.shape[0], bed_polygon),
+                )
+            )
+
+    return FrameAnalysis(people=tuple(people))
