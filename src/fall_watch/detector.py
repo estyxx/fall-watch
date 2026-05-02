@@ -17,6 +17,16 @@ _RIGHT_HIP = 12
 _LEFT_ANKLE = 15
 _RIGHT_ANKLE = 16
 
+# BGR colours for the debug overlay
+_COLOR_OK = (50, 200, 50)
+_COLOR_ON_FLOOR = (30, 30, 220)
+_COLOR_CLIMBING = (0, 200, 240)
+_COLOR_FLOOR_ROI = (200, 200, 0)
+_COLOR_BED_ROI = (0, 140, 255)
+_COLOR_SHOULDER = (255, 120, 0)
+_COLOR_HIP = (0, 165, 255)
+_COLOR_ANKLE = (180, 0, 180)
+
 
 @dataclass(frozen=True)
 class PersonDetection:
@@ -253,3 +263,91 @@ def analyse_frame(
         analysis.any_climbing_out,
     )
     return analysis
+
+
+def draw_debug_overlay(
+    frame: np.ndarray,
+    analysis: FrameAnalysis,
+    floor_roi: tuple[tuple[int, int], ...] | None = None,
+    bed_roi: tuple[tuple[int, int], ...] | None = None,
+) -> np.ndarray:
+    """Return an annotated copy of frame showing ROI zones, keypoints, and detection labels."""
+    out = frame.copy()
+
+    _draw_roi(out, floor_roi, _COLOR_FLOOR_ROI, "FLOOR ROI")
+    _draw_roi(out, bed_roi, _COLOR_BED_ROI, "BED ROI")
+
+    for person in analysis.people:
+        _draw_person(out, person)
+
+    if not analysis.people:
+        _put_label(out, "NO PERSON DETECTED", (10, 30), _COLOR_ON_FLOOR)
+
+    return out
+
+
+def _draw_roi(
+    out: np.ndarray,
+    polygon: tuple[tuple[int, int], ...] | None,
+    color: tuple[int, int, int],
+    label: str,
+) -> None:
+    if polygon is None:
+        return
+    pts = np.array(polygon, dtype=np.int32)
+
+    # Filled semi-transparent zone
+    overlay = out.copy()
+    cv2.fillPoly(overlay, [pts], color)
+    cv2.addWeighted(overlay, 0.15, out, 0.85, 0, out)
+
+    # Solid border
+    cv2.polylines(out, [pts], isClosed=True, color=color, thickness=2)
+
+    # Centroid label
+    cx, cy = int(pts[:, 0].mean()), int(pts[:, 1].mean())
+    _put_label(out, label, (cx - 40, cy), color)
+
+
+def _draw_person(out: np.ndarray, person: PersonDetection) -> None:
+    x1, y1, x2, y2 = person.box
+
+    if person.on_floor:
+        box_color = _COLOR_ON_FLOOR
+        status = "LYING DOWN"
+    elif person.climbing_out:
+        box_color = _COLOR_CLIMBING
+        status = "CLIMBING"
+    else:
+        box_color = _COLOR_OK
+        status = "OK"
+
+    cv2.rectangle(out, (x1, y1), (x2, y2), box_color, 2)
+
+    tag = f"{status}  {person.box_confidence:.0%}"
+    (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+    cv2.rectangle(out, (x1, y1 - th - 8), (x1 + tw + 6, y1), box_color, cv2.FILLED)
+    cv2.putText(out, tag, (x1 + 3, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    kps = person.keypoints
+    for idx, kp_color in [
+        (_LEFT_SHOULDER, _COLOR_SHOULDER),
+        (_RIGHT_SHOULDER, _COLOR_SHOULDER),
+        (_LEFT_HIP, _COLOR_HIP),
+        (_RIGHT_HIP, _COLOR_HIP),
+        (_LEFT_ANKLE, _COLOR_ANKLE),
+        (_RIGHT_ANKLE, _COLOR_ANKLE),
+    ]:
+        if (pt := _keypoint(kps, idx)) is not None:
+            cv2.circle(out, (int(pt[0]), int(pt[1])), 6, kp_color, cv2.FILLED)
+            cv2.circle(out, (int(pt[0]), int(pt[1])), 6, (255, 255, 255), 1)
+
+
+def _put_label(
+    out: np.ndarray,
+    text: str,
+    origin: tuple[int, int],
+    color: tuple[int, int, int],
+) -> None:
+    cv2.putText(out, text, origin, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
+    cv2.putText(out, text, origin, cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)

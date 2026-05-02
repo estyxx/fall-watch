@@ -11,10 +11,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import cv2  # noqa: E402
+import numpy as np  # noqa: E402
 
 from fall_watch.climb_watcher import ClimbWatcher  # noqa: E402
 from fall_watch.config import Config  # noqa: E402
-from fall_watch.detector import FrameAnalysis, analyse_frame, load_model  # noqa: E402
+from fall_watch.detector import (  # noqa: E402
+    FrameAnalysis,
+    analyse_frame,
+    draw_debug_overlay,
+    load_model,
+)
 from fall_watch.fall_watcher import FallWatcher  # noqa: E402
 from fall_watch.notifier import Notifier, TelegramNotifier  # noqa: E402
 
@@ -75,17 +81,58 @@ def _reconnect(config: Config, cap: cv2.VideoCapture) -> cv2.VideoCapture:
         return cap
 
 
-def _handle_commands(notifier: Notifier, watcher: FallWatcher, offset: int) -> int:
-    """Poll Telegram for commands and reply to any /status requests."""
+def _handle_commands(
+    notifier: Notifier,
+    watcher: FallWatcher,
+    offset: int,
+    config: Config,
+    last_frame: np.ndarray | None,
+    last_analysis: FrameAnalysis | None,
+) -> int:
+    """Poll Telegram for commands and reply to /status and /debug requests."""
     commands, new_offset = notifier.poll_commands(offset)
     for chat_id, cmd in commands:
         match cmd:
             case "/status":
                 logger.info("📲 /status requested by chat %s", chat_id)
                 watcher.handle_status_request(chat_id)
+            case "/debug":
+                logger.info("📲 /debug requested by chat %s", chat_id)
+                _handle_debug(notifier, config, chat_id, last_frame, last_analysis)
             case _:
                 logger.warning("⚙️  Unknown command '%s' from chat %s — ignored", cmd, chat_id)
     return new_offset
+
+
+def _handle_debug(
+    notifier: Notifier,
+    config: Config,
+    chat_id: str,
+    last_frame: np.ndarray | None,
+    last_analysis: FrameAnalysis | None,
+) -> None:
+    if last_frame is None or last_analysis is None:
+        notifier.send_debug_reply(
+            chat_id, np.zeros((100, 400, 3), dtype=np.uint8), "⏳ No frame captured yet."
+        )
+        return
+
+    annotated = draw_debug_overlay(last_frame, last_analysis, config.floor_roi, config.bed_roi)
+
+    n = len(last_analysis.people)
+    person_lines = "\n".join(
+        f"  👤 Person {i + 1}: {'🔴 LYING DOWN' if p.on_floor else '🟡 CLIMBING' if p.climbing_out else '🟢 OK'}  ({p.box_confidence:.0%})"
+        for i, p in enumerate(last_analysis.people)
+    )
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    summary = (
+        f"🔍 <b>Debug snapshot</b> — {timestamp}\n\n"
+        f"👁 {n} person{'s' if n != 1 else ''} detected\n"
+        f"{person_lines}\n\n"
+        f"📐 FLOOR_ROI: {'✅ set' if config.floor_roi else '❌ not set'}\n"
+        f"📐 BED_ROI: {'✅ set' if config.bed_roi else '❌ not set'}"
+    )
+    notifier.send_debug_reply(chat_id, annotated, summary)
 
 
 def main() -> None:
@@ -101,10 +148,14 @@ def main() -> None:
     cap = _open_stream(config.rtsp_url)
 
     update_offset = 0
+    last_frame: np.ndarray | None = None
+    last_analysis: FrameAnalysis | None = None
 
     try:
         while True:
-            update_offset = _handle_commands(notifier, watcher, update_offset)
+            update_offset = _handle_commands(
+                notifier, watcher, update_offset, config, last_frame, last_analysis
+            )
 
             ret, frame = cap.read()
             if not ret:
@@ -112,11 +163,12 @@ def main() -> None:
                 continue
 
             now = datetime.now()
-            analysis: FrameAnalysis = analyse_frame(
+            last_analysis = analyse_frame(
                 model, frame, floor_roi=config.floor_roi, bed_polygon=config.bed_roi
             )
-            watcher.observe(analysis.any_on_floor, frame, now)
-            climb_watcher.observe(analysis.any_climbing_out, frame, now)
+            last_frame = frame
+            watcher.observe(last_analysis.any_on_floor, frame, now)
+            climb_watcher.observe(last_analysis.any_climbing_out, frame, now)
 
             time.sleep(config.frame_interval_seconds)
     finally:

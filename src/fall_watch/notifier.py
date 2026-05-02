@@ -19,6 +19,7 @@ class Notifier(Protocol):
     def send_status_reply(
         self, chat_id: str, frame: np.ndarray | None, on_floor_since: datetime | None
     ) -> bool: ...
+    def send_debug_reply(self, chat_id: str, annotated_frame: np.ndarray, caption: str) -> bool: ...
     def poll_commands(self, offset: int) -> tuple[list[tuple[str, str]], int]: ...
 
 
@@ -146,6 +147,10 @@ class TelegramNotifier:
             f"🕐 {self._now()}"
         )
         return self._send_photo(frame, caption)
+
+    def send_debug_reply(self, chat_id: str, annotated_frame: np.ndarray, caption: str) -> bool:
+        """Send an annotated debug frame to the requesting chat."""
+        return self._send_photo(annotated_frame, caption, chat_id)
 
     def send_startup(self) -> bool:
         sent = self._send_text(
