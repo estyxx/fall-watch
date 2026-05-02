@@ -10,9 +10,9 @@ from dotenv import load_dotenv
 # Must run before local imports so Config.load() reads populated os.environ
 load_dotenv()
 
-import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
+from fall_watch.camera import FrameReader, FreshFrameCapture  # noqa: E402
 from fall_watch.climb_watcher import ClimbWatcher  # noqa: E402
 from fall_watch.config import Config  # noqa: E402
 from fall_watch.detector import (  # noqa: E402
@@ -62,23 +62,15 @@ def _setup_logging() -> None:
     logger.info("📝 Logging to %s at level %s", log_file, log_level)
 
 
-def _open_stream(url: str) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(url)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera stream: {url}")
-    logger.info("📷 Camera stream connected")
-    return cap
-
-
-def _reconnect(config: Config, cap: cv2.VideoCapture) -> cv2.VideoCapture:
+def _reconnect(config: Config, cap: FrameReader) -> FreshFrameCapture:
     logger.warning("⚠️  Lost camera connection, retrying in 10s...")
     cap.release()
-    time.sleep(10)
-    try:
-        return _open_stream(config.rtsp_url)
-    except RuntimeError as e:
-        logger.error("❌ Reconnect failed: %s — will retry", e)
-        return cap
+    while True:
+        time.sleep(10)
+        try:
+            return FreshFrameCapture(config.rtsp_url, config.reader_poll_interval)
+        except RuntimeError as e:
+            logger.error("❌ Reconnect failed: %s — will retry in 10s", e)
 
 
 def _handle_commands(
@@ -145,7 +137,7 @@ def main() -> None:
     watcher = FallWatcher(config, notifier)
     climb_watcher = ClimbWatcher(config, notifier)
     notifier.send_startup()
-    cap = _open_stream(config.rtsp_url)
+    cap: FrameReader = FreshFrameCapture(config.rtsp_url, config.reader_poll_interval)
 
     update_offset = 0
     last_frame: np.ndarray | None = None
@@ -157,9 +149,13 @@ def main() -> None:
                 notifier, watcher, update_offset, config, last_frame, last_analysis
             )
 
-            ret, frame = cap.read()
-            if not ret:
+            if cap.failed:
                 cap = _reconnect(config, cap)
+                continue
+
+            frame = cap.read_latest()
+            if frame is None:
+                time.sleep(config.frame_interval_seconds)
                 continue
 
             now = datetime.now()
