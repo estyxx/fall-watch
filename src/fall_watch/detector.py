@@ -283,7 +283,35 @@ def draw_debug_overlay(
     if not analysis.people:
         _put_label(out, "NO PERSON DETECTED", (10, 30), _COLOR_ON_FLOOR)
 
+    _draw_status_banner(out, analysis)
+
     return out
+
+
+def _draw_status_banner(out: np.ndarray, analysis: FrameAnalysis) -> None:
+    """Draw a coloured status banner at the bottom of the frame."""
+    if analysis.any_on_floor:
+        color = _COLOR_ON_FLOOR
+        text = "  ON FLOOR"
+    elif analysis.any_climbing_out:
+        color = _COLOR_CLIMBING
+        text = "  CLIMBING OUT"
+    elif analysis.people:
+        color = _COLOR_OK
+        text = "  OK"
+    else:
+        color = (80, 80, 80)
+        text = "  NO PERSON"
+
+    h, w = out.shape[:2]
+    banner_h = 36
+    y0 = h - banner_h
+
+    overlay = out.copy()
+    cv2.rectangle(overlay, (0, y0), (w, h), color, cv2.FILLED)
+    cv2.addWeighted(overlay, 0.75, out, 0.25, 0, out)
+
+    cv2.putText(out, text, (4, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
 
 def _draw_roi(
