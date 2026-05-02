@@ -23,14 +23,18 @@ logger = logging.getLogger(__name__)
 
 def _setup_logging() -> None:
     log_file = os.getenv("LOG_FILE", "fall-watch.log")
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.config.dictConfig(
         {
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": {
-                "console": {"format": "[%(asctime)s] %(message)s", "datefmt": "%H:%M:%S"},
+                "console": {
+                    "format": "[%(asctime)s] %(levelname)s %(name)s — %(message)s",
+                    "datefmt": "%H:%M:%S",
+                },
                 "file": {
-                    "format": "[%(asctime)s] %(levelname)s %(message)s",
+                    "format": "[%(asctime)s] %(levelname)s %(name)s — %(message)s",
                     "datefmt": "%Y-%m-%d %H:%M:%S",
                 },
             },
@@ -46,10 +50,10 @@ def _setup_logging() -> None:
                     "formatter": "file",
                 },
             },
-            "root": {"level": "INFO", "handlers": ["console", "file"]},
+            "root": {"level": log_level, "handlers": ["console", "file"]},
         }
     )
-    logger.info("📝 Logging to file: %s", log_file)
+    logger.info("📝 Logging to %s at level %s", log_file, log_level)
 
 
 def _open_stream(url: str) -> cv2.VideoCapture:
